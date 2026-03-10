@@ -1,4 +1,4 @@
-"""MainView — input screen with text area, drop zone, analysis button."""
+"""MainView — primary analysis input screen."""
 from __future__ import annotations
 from pathlib import Path
 from PySide6.QtCore import Signal, Qt
@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 from aiqyn.ui.widgets.drop_zone import DropZone
+from aiqyn.ui import theme as th
 
 
 class MainView(QWidget):
@@ -18,91 +19,156 @@ class MainView(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # Header
-        title = QLabel("Aiqyn")
-        title.setObjectName("title")
-        subtitle = QLabel("Детектор ИИ-сгенерированного текста · offline · русский язык")
-        subtitle.setObjectName("subtitle")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        # Content area with padding
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(40, 32, 40, 24)
+        layout.setSpacing(0)
 
-        # Drop zone
+        # ---- Page header ----
+        header = QWidget()
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 24)
+        header_layout.setSpacing(4)
+
+        page_title = QLabel("Анализ текста")
+        page_title.setObjectName("heading1")
+
+        page_sub = QLabel(
+            "Вставьте текст или перетащите файл для определения источника"
+        )
+        page_sub.setObjectName("secondary")
+
+        header_layout.addWidget(page_title)
+        header_layout.addWidget(page_sub)
+        layout.addWidget(header)
+
+        # ---- Drop zone ----
         self._drop_zone = DropZone()
         self._drop_zone.file_dropped.connect(self._on_file_dropped)
         layout.addWidget(self._drop_zone)
+        layout.addSpacing(12)
 
-        # Text input
+        # ---- Text input area ----
         self._text_edit = QTextEdit()
         self._text_edit.setPlaceholderText(
-            "Вставьте текст для анализа (от 50 слов)…"
+            "Вставьте текст для анализа (минимум 50 слов)…\n\n"
+            "Поддерживаются тексты на русском языке: статьи, сочинения, "
+            "отчёты, переписка и другие документы."
         )
-        self._text_edit.setMinimumHeight(280)
+        self._text_edit.setMinimumHeight(300)
+        self._text_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._text_edit.textChanged.connect(self._on_text_changed)
-        layout.addWidget(self._text_edit)
+        layout.addWidget(self._text_edit, 1)
 
-        # Stats label
-        self._stats_label = QLabel("Слов: 0")
-        self._stats_label.setObjectName("muted")
-        layout.addWidget(self._stats_label)
+        # ---- Stats + options row ----
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 8, 0, 0)
 
-        # Progress bar (hidden until analysis)
+        self._stats_label = QLabel("Слов: 0  |  Символов: 0")
+        self._stats_label.setObjectName("caption")
+
+        meta_row.addWidget(self._stats_label)
+        meta_row.addStretch()
+
+        # Quick toggle: use LLM
+        self._llm_label = QLabel("LLM:")
+        self._llm_label.setObjectName("caption")
+
+        self._llm_btn_on = QPushButton("Полный")
+        self._llm_btn_on.setObjectName("secondary")
+        self._llm_btn_on.setFixedHeight(28)
+        self._llm_btn_on.setCheckable(False)
+        self._llm_btn_on.setFixedWidth(72)
+        self._llm_btn_on.clicked.connect(lambda: self._start_analysis(use_llm=True))
+
+        self._llm_btn_off = QPushButton("Быстрый")
+        self._llm_btn_off.setObjectName("secondary")
+        self._llm_btn_off.setFixedHeight(28)
+        self._llm_btn_off.setFixedWidth(72)
+        self._llm_btn_off.clicked.connect(lambda: self._start_analysis(use_llm=False))
+
+        meta_row.addWidget(self._llm_label)
+        meta_row.addSpacing(4)
+        meta_row.addWidget(self._llm_btn_off)
+        meta_row.addWidget(self._llm_btn_on)
+
+        layout.addLayout(meta_row)
+        layout.addSpacing(16)
+
+        # ---- Progress bar (hidden until analysis starts) ----
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
-        self._progress.setFixedHeight(6)
         self._progress.hide()
         layout.addWidget(self._progress)
 
         self._progress_label = QLabel("")
-        self._progress_label.setObjectName("muted")
+        self._progress_label.setObjectName("caption")
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._progress_label.hide()
         layout.addWidget(self._progress_label)
+        layout.addSpacing(4)
 
-        # Buttons
-        btn_row = QHBoxLayout()
-        self._open_btn = QPushButton("Открыть файл")
+        # ---- Action row ----
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        self._open_btn = QPushButton("\u2191  Открыть файл")
         self._open_btn.setObjectName("secondary")
+        self._open_btn.setFixedHeight(44)
         self._open_btn.clicked.connect(self._open_file_dialog)
 
-        self._no_llm_btn = QPushButton("Быстрый анализ (без LLM)")
-        self._no_llm_btn.setObjectName("secondary")
-        self._no_llm_btn.clicked.connect(lambda: self._start_analysis(use_llm=False))
-
-        self._analyze_btn = QPushButton("⚡ Анализировать")
-        self._analyze_btn.setEnabled(False)
-        self._analyze_btn.clicked.connect(lambda: self._start_analysis(use_llm=True))
-        self._analyze_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        self._cancel_btn = QPushButton("Отмена")
+        self._cancel_btn = QPushButton("Отменить")
         self._cancel_btn.setObjectName("secondary")
+        self._cancel_btn.setFixedHeight(44)
         self._cancel_btn.hide()
 
-        btn_row.addWidget(self._open_btn)
-        btn_row.addWidget(self._no_llm_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(self._cancel_btn)
-        btn_row.addWidget(self._analyze_btn)
-        layout.addLayout(btn_row)
-
-        # Disclaimer
-        disclaimer = QLabel(
-            "⚠ Результат носит вероятностный характер. "
-            "Не является доказательством."
+        self._analyze_btn = QPushButton("Анализировать")
+        self._analyze_btn.setObjectName("primary_large")
+        self._analyze_btn.setFixedHeight(48)
+        self._analyze_btn.setEnabled(False)
+        self._analyze_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        disclaimer.setObjectName("muted")
+        self._analyze_btn.clicked.connect(lambda: self._start_analysis(use_llm=True))
+
+        action_row.addWidget(self._open_btn)
+        action_row.addStretch()
+        action_row.addWidget(self._cancel_btn)
+        action_row.addWidget(self._analyze_btn)
+        layout.addLayout(action_row)
+
+        # ---- Disclaimer ----
+        layout.addSpacing(16)
+        disclaimer = QLabel(
+            "Результат носит вероятностный характер и не является юридическим доказательством."
+        )
+        disclaimer.setObjectName("caption")
         disclaimer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(disclaimer)
 
+        outer.addWidget(content, 1)
+
+    # ------------------------------------------------------------------
+    # Internal handlers
+    # ------------------------------------------------------------------
+
     def _on_text_changed(self) -> None:
         text = self._text_edit.toPlainText()
-        words = len(text.split())
-        self._stats_label.setText(f"Слов: {words}  · Символов: {len(text)}")
-        self._analyze_btn.setEnabled(words >= 30)
+        words = len(text.split()) if text.strip() else 0
+        chars = len(text)
+        self._stats_label.setText(f"Слов: {words}  |  Символов: {chars}")
+        enabled = words >= 30
+        self._analyze_btn.setEnabled(enabled)
+        self._llm_btn_on.setEnabled(enabled)
+        self._llm_btn_off.setEnabled(enabled)
 
     def _on_file_dropped(self, path: str) -> None:
         self._load_file(path)
@@ -134,32 +200,40 @@ class MainView(QWidget):
         self.set_analyzing(True)
         self.analyze_requested.emit(text, use_llm)
 
+    # ------------------------------------------------------------------
+    # Public API (called from MainWindow)
+    # ------------------------------------------------------------------
+
     def set_analyzing(self, active: bool) -> None:
         self._analyze_btn.setEnabled(not active)
-        self._no_llm_btn.setEnabled(not active)
+        self._llm_btn_on.setEnabled(not active)
+        self._llm_btn_off.setEnabled(not active)
         self._open_btn.setEnabled(not active)
         self._cancel_btn.setVisible(active)
+        self._text_edit.setReadOnly(active)
         if active:
             self._progress.setValue(0)
             self._progress.show()
             self._progress_label.show()
+            self._progress_label.setText("Запускаю анализ…")
         else:
             self._progress.hide()
             self._progress_label.hide()
+            self._text_edit.setReadOnly(False)
 
     def update_progress(self, feature_id: str, pct: float) -> None:
         self._progress.setValue(int(pct))
         labels = {
-            "f01_perplexity": "Вычисляю перплексию…",
-            "f02_burstiness": "Анализирую вариативность…",
-            "f04_lexical_diversity": "Лексическое разнообразие…",
-            "f07_sentence_length": "Длины предложений…",
-            "f10_ai_phrases": "Поиск маркеров ИИ…",
-            "f11_emotional_neutrality": "Эмоциональный тон…",
-            "f12_coherence_smoothness": "Когерентность…",
-            "f13_weak_specificity": "Конкретика…",
-            "f14_token_rank": "Ранги токенов…",
-            "f15_style_consistency": "Консистентность стиля…",
+            "f01_perplexity":          "Вычисляю перплексию…",
+            "f02_burstiness":          "Анализирую вариативность…",
+            "f04_lexical_diversity":   "Лексическое разнообразие…",
+            "f07_sentence_length":     "Длины предложений…",
+            "f10_ai_phrases":          "Поиск маркеров ИИ…",
+            "f11_emotional_neutrality":"Эмоциональный тон…",
+            "f12_coherence_smoothness":"Когерентность текста…",
+            "f13_weak_specificity":    "Конкретика и детали…",
+            "f14_token_rank":          "Ранги токенов…",
+            "f15_style_consistency":   "Консистентность стиля…",
         }
         self._progress_label.setText(labels.get(feature_id, f"Обрабатываю {feature_id}…"))
 

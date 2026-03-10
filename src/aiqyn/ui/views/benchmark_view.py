@@ -1,14 +1,17 @@
-"""BenchmarkView — run calibration on a dataset folder."""
+"""BenchmarkView — calibration dataset runner."""
 from __future__ import annotations
 import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-    QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QProgressBar, QPushButton, QScrollArea,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 import structlog
+
+from aiqyn.ui import theme as th
 
 log = structlog.get_logger(__name__)
 
@@ -41,9 +44,8 @@ class BenchmarkWorker(QThread):
 
         for label_val, folder in [(0, self._human), (1, self._ai)]:
             txt_files = list(folder.glob("*.txt"))
-            self.progress.emit(
-                f"Анализирую {'human' if label_val == 0 else 'AI'}: {len(txt_files)} файлов"
-            )
+            kind = "human" if label_val == 0 else "AI"
+            self.progress.emit(f"Анализирую {kind}: {len(txt_files)} файлов")
             for fpath in txt_files:
                 try:
                     text = fpath.read_text(encoding="utf-8", errors="replace")
@@ -52,14 +54,12 @@ class BenchmarkWorker(QThread):
                     result = analyzer.analyze(text)
                     scores.append(result.overall_score)
                     labels.append(label_val)
-                    self.progress.emit(
-                        f"  {fpath.name}: score={result.overall_score:.3f}"
-                    )
+                    self.progress.emit(f"  {fpath.name}: score={result.overall_score:.3f}")
                 except Exception as exc:
                     self.progress.emit(f"  ОШИБКА {fpath.name}: {exc}")
 
         if len(scores) < 4:
-            self.progress.emit("Недостаточно файлов для калибровки (нужно ≥ 4)")
+            self.progress.emit("Недостаточно файлов для калибровки (нужно минимум 4)")
             self.finished.emit({})
             return
 
@@ -69,7 +69,7 @@ class BenchmarkWorker(QThread):
         cal.save()
 
         self.progress.emit(
-            f"\n✓ Калибровка завершена: A={cal.A:.4f}, B={cal.B:.4f}"
+            f"\nКалибровка завершена: A={cal.A:.4f}, B={cal.B:.4f}"
         )
         self.progress.emit(
             f"F1={metrics.get('f1', 0):.3f}  "
@@ -78,6 +78,52 @@ class BenchmarkWorker(QThread):
             f"Accuracy={metrics.get('accuracy', 0):.3f}"
         )
         self.finished.emit(metrics)
+
+
+class FolderPickRow(QWidget):
+    """Folder picker row: label + path display + button."""
+
+    def __init__(self, title: str, dialog_title: str, parent=None) -> None:
+        super().__init__(parent)
+        self._dialog_title = dialog_title
+        t = th.current()
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        lbl = QLabel(title)
+        lbl.setObjectName("body")
+        lbl.setFixedWidth(120)
+        layout.addWidget(lbl)
+
+        self._path_lbl = QLabel("Не выбрано")
+        self._path_lbl.setObjectName("secondary")
+        self._path_lbl.setSizePolicy(
+            self._path_lbl.sizePolicy().horizontalPolicy(),
+            self._path_lbl.sizePolicy().verticalPolicy(),
+        )
+        layout.addWidget(self._path_lbl, 1)
+
+        pick_btn = QPushButton("Выбрать папку")
+        pick_btn.setObjectName("secondary")
+        pick_btn.setFixedHeight(36)
+        pick_btn.clicked.connect(self._pick)
+        layout.addWidget(pick_btn)
+
+    def _pick(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, self._dialog_title)
+        if path:
+            self._path_lbl.setText(path)
+            self._path_lbl.setObjectName("body")
+            self._path_lbl.style().unpolish(self._path_lbl)
+            self._path_lbl.style().polish(self._path_lbl)
+
+    def get_path(self) -> str:
+        return self._path_lbl.text()
+
+    def is_selected(self) -> bool:
+        return self._path_lbl.text() != "Не выбрано"
 
 
 class BenchmarkView(QWidget):
@@ -89,96 +135,150 @@ class BenchmarkView(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        t = th.current()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        top = QHBoxLayout()
-        back_btn = QPushButton("← Назад")
-        back_btn.setObjectName("secondary")
-        back_btn.clicked.connect(self.back_requested)
-        title = QLabel("Калибровка модели")
-        title.setObjectName("title")
-        top.addWidget(back_btn)
-        top.addWidget(title)
-        top.addStretch()
-        layout.addLayout(top)
-
-        desc = QLabel(
-            "Укажите папки с текстами для калибровки классификатора.\n"
-            "В папке «Человек» — .txt файлы человеческих текстов.\n"
-            "В папке «ИИ» — .txt файлы AI-сгенерированных текстов.\n"
-            "Рекомендуется ≥ 50 файлов в каждой папке."
+        # ---- Header bar ----
+        header_bar = QWidget()
+        header_bar.setFixedHeight(52)
+        header_bar.setStyleSheet(
+            f"background-color: {t['bg_surface']}; "
+            f"border-bottom: 1px solid {t['border']};"
         )
-        desc.setObjectName("subtitle")
+        hb_layout = QHBoxLayout(header_bar)
+        hb_layout.setContentsMargins(20, 0, 20, 0)
+
+        title = QLabel("Калибровка модели")
+        title.setObjectName("heading3")
+        hb_layout.addWidget(title)
+        hb_layout.addStretch()
+        layout.addWidget(header_bar)
+
+        # ---- Scrollable content ----
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(16)
+
+        # Description
+        desc = QLabel(
+            "Укажите папки с размеченными текстами для калибровки классификатора.\n"
+            "Папка «Человек» — .txt файлы заведомо человеческих текстов.\n"
+            "Папка «ИИ» — .txt файлы AI-сгенерированных текстов.\n"
+            "Рекомендуется не менее 50 файлов в каждой папке."
+        )
+        desc.setObjectName("secondary")
         desc.setWordWrap(True)
-        layout.addWidget(desc)
+        content_layout.addWidget(desc)
 
-        # Folder pickers
-        group = QGroupBox("Датасет")
-        form = QVBoxLayout(group)
+        # Folder pickers card
+        pickers_card = QWidget()
+        pickers_card.setObjectName("card")
+        pickers_layout = QVBoxLayout(pickers_card)
+        pickers_layout.setContentsMargins(16, 16, 16, 16)
+        pickers_layout.setSpacing(12)
 
-        human_row = QHBoxLayout()
-        self._human_path = QLabel("Не выбрано")
-        self._human_path.setObjectName("muted")
-        human_btn = QPushButton("Папка «Человек»")
-        human_btn.setObjectName("secondary")
-        human_btn.clicked.connect(lambda: self._pick_folder("human"))
-        human_row.addWidget(human_btn)
-        human_row.addWidget(self._human_path, 1)
-        form.addLayout(human_row)
+        pick_title = QLabel("ДАТАСЕТ")
+        pick_title.setStyleSheet(
+            f"font-size: 10px; font-weight: 700; color: {t['text_muted']}; "
+            f"letter-spacing: 1px; background: transparent;"
+        )
+        pickers_layout.addWidget(pick_title)
 
-        ai_row = QHBoxLayout()
-        self._ai_path = QLabel("Не выбрано")
-        self._ai_path.setObjectName("muted")
-        ai_btn = QPushButton("Папка «ИИ»")
-        ai_btn.setObjectName("secondary")
-        ai_btn.clicked.connect(lambda: self._pick_folder("ai"))
-        ai_row.addWidget(ai_btn)
-        ai_row.addWidget(self._ai_path, 1)
-        form.addLayout(ai_row)
+        self._human_row = FolderPickRow("Тексты людей", "Выберите папку с текстами людей")
+        pickers_layout.addWidget(self._human_row)
 
-        layout.addWidget(group)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"background: {t['border']}; color: {t['border']};")
+        sep.setFixedHeight(1)
+        pickers_layout.addWidget(sep)
 
-        self._run_btn = QPushButton("▶ Запустить калибровку")
+        self._ai_row = FolderPickRow("Тексты ИИ", "Выберите папку с AI-текстами")
+        pickers_layout.addWidget(self._ai_row)
+
+        content_layout.addWidget(pickers_card)
+
+        # Run button + progress
+        run_row = QHBoxLayout()
+        self._run_btn = QPushButton("\u25b6  Запустить калибровку")
+        self._run_btn.setObjectName("primary_large")
+        self._run_btn.setFixedHeight(48)
         self._run_btn.clicked.connect(self._run)
-        layout.addWidget(self._run_btn)
+        run_row.addStretch()
+        run_row.addWidget(self._run_btn)
+        content_layout.addLayout(run_row)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)  # indeterminate
         self._progress.hide()
-        layout.addWidget(self._progress)
+        content_layout.addWidget(self._progress)
+
+        # Log output card
+        log_card = QWidget()
+        log_card.setObjectName("card")
+        log_layout = QVBoxLayout(log_card)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+
+        log_header = QWidget()
+        log_header.setFixedHeight(36)
+        log_header.setStyleSheet(
+            f"background: {t['bg_elevated']}; border-radius: 6px 6px 0 0; "
+            f"border-bottom: 1px solid {t['border']};"
+        )
+        log_header_layout = QHBoxLayout(log_header)
+        log_header_layout.setContentsMargins(12, 0, 12, 0)
+        log_header_label = QLabel("ЛОГ ВЫПОЛНЕНИЯ")
+        log_header_label.setStyleSheet(
+            f"font-size: 10px; font-weight: 700; color: {t['text_muted']}; "
+            f"letter-spacing: 1px; background: transparent;"
+        )
+        log_header_layout.addWidget(log_header_label)
+        log_layout.addWidget(log_header)
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setPlaceholderText("Лог калибровки появится здесь…")
-        layout.addWidget(self._log, 1)
+        self._log.setMinimumHeight(200)
+        self._log.setStyleSheet(
+            f"QTextEdit {{ background: transparent; border: none; "
+            f"padding: 12px; font-family: 'Consolas', 'Courier New', monospace; "
+            f"font-size: 12px; color: {t['text_secondary']}; }}"
+        )
+        log_layout.addWidget(self._log)
+        content_layout.addWidget(log_card, 1)
 
+        # Result label
         self._result_label = QLabel("")
-        self._result_label.setObjectName("subtitle")
-        layout.addWidget(self._result_label)
+        self._result_label.setObjectName("heading3")
+        self._result_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content_layout.addWidget(self._result_label)
 
-    def _pick_folder(self, kind: str) -> None:
-        path = QFileDialog.getExistingDirectory(self, f"Выберите папку '{kind}'")
-        if path:
-            if kind == "human":
-                self._human_path.setText(path)
-            else:
-                self._ai_path.setText(path)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
 
     def _run(self) -> None:
-        human = self._human_path.text()
-        ai = self._ai_path.text()
-        if human == "Не выбрано" or ai == "Не выбрано":
+        if not self._human_row.is_selected() or not self._ai_row.is_selected():
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Ошибка", "Выберите обе папки")
+            QMessageBox.warning(self, "Ошибка", "Выберите обе папки с датасетами")
             return
 
         self._log.clear()
+        self._result_label.setText("")
         self._run_btn.setEnabled(False)
         self._progress.show()
 
-        self._worker = BenchmarkWorker(human, ai)
+        self._worker = BenchmarkWorker(
+            self._human_row.get_path(),
+            self._ai_row.get_path(),
+        )
         self._worker.progress.connect(lambda msg: self._log.append(msg))
         self._worker.finished.connect(self._on_done)
         self._worker.start()
@@ -187,8 +287,10 @@ class BenchmarkView(QWidget):
         self._run_btn.setEnabled(True)
         self._progress.hide()
         if metrics:
+            t = th.current()
+            self._result_label.setStyleSheet(f"color: {t['score_human']};")
             self._result_label.setText(
-                f"✓ Калибровка сохранена · "
-                f"F1: {metrics.get('f1', 0):.3f} · "
+                f"Калибровка сохранена  \u00b7  "
+                f"F1: {metrics.get('f1', 0):.3f}  \u00b7  "
                 f"Accuracy: {metrics.get('accuracy', 0):.3f}"
             )
