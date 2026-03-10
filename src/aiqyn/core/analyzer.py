@@ -43,7 +43,7 @@ class TextAnalyzer:
         self._preprocessor = TextPreprocessor(load_spacy=load_spacy)
         self._pipeline = AnalysisPipeline(
             enabled_features=self._config.enabled_features,
-            weights=self._config.weights,
+            weights=self._config.active_weights,
         )
         self._aggregator = WeightedSumAggregator()
         self._segmenter = TextSegmenter(
@@ -128,7 +128,7 @@ class TextAnalyzer:
                 f for f in self._config.enabled_features
                 if f not in ("f01_perplexity", "f14_token_rank")
             ],
-            weights=self._config.weights,
+            weights=self._config.active_weights,
             max_workers=2,
         )
 

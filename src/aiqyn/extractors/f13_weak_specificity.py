@@ -2,6 +2,12 @@
 
 AI tends to write in abstract generalities; human text cites specific names,
 places, dates, organizations.
+
+For official/business documents an additional dimension is tracked:
+- specific legal references (article №, order №, exact dates, precise percentages)
+  indicate human authorship
+- vague administrative phrases ("действующее законодательство", "соответствующие органы")
+  are typical AI substitutes for concrete references
 """
 from __future__ import annotations
 import re
@@ -16,6 +22,21 @@ _DATE_RE = re.compile(
 )
 _NUMBER_RE = re.compile(r"\b\d+[,.]?\d*\s*(%|руб|тыс|млн|млрд|кг|км|мм|см|га)?\b")
 _PROPER_UPPER_RE = re.compile(r"\b[А-ЯЁ][а-яё]{2,}\b")  # Russian capitalized words
+
+# Specific legal/document references — strong indicator of human authorship
+_SPECIFIC_LEGAL_RE = re.compile(
+    r"(ст\.|п\.|пп\.|ч\.|№\s*\d+|приказ[а-яё]?\s*№|закон[а-яё]?\s*№"
+    r"|\d+[,\.]\d+\s*%|\d{1,2}\.\d{2}\.\d{4})",
+    re.IGNORECASE,
+)
+
+# Vague administrative phrases — typical AI substitutes for concrete references
+_VAGUE_ADMIN_RE = re.compile(
+    r"(действующ\w+\s+законодательств\w+|нормативн\w+\s+акт\w+|"
+    r"соответствующ\w+\s+орган\w+|установленн\w+\s+порядк\w+|"
+    r"в\s+установленном\s+порядке|в\s+соответствии\s+с\s+законодательством)",
+    re.IGNORECASE,
+)
 
 
 class WeakSpecificityExtractor:
@@ -60,22 +81,44 @@ class WeakSpecificityExtractor:
         # Specificity density: concrete anchors per 100 words
         specificity = specific_count / n_words * 100
 
-        # Low specificity → AI-like (abstract, no concrete anchors)
-        # High specificity → human-like (cites real things)
-        normalized = max(0.0, min(1.0, 1.0 - specificity / 15.0))
+        # --- Business/official document calibration ---
+        # Count concrete legal references vs. vague administrative placeholders.
+        # A document rich in "ст. 81 ТК РФ", "приказ №47", "66,7%" is more
+        # human-like than one using "действующее законодательство" everywhere.
+        specific_legal = len(_SPECIFIC_LEGAL_RE.findall(text))
+        vague_admin = len(_VAGUE_ADMIN_RE.findall(text))
+
+        if specific_legal + vague_admin > 0:
+            # High ratio (many concrete refs) → human; low ratio → AI-like
+            specificity_ratio = specific_legal / (specific_legal + vague_admin)
+        else:
+            specificity_ratio = 0.5  # neutral — no legal/admin language detected
+
+        # Combine old specificity density with new legal-specificity ratio:
+        # old_normalized: low specificity density → high AI score
+        # new_normalized: low specificity_ratio (few concrete refs) → high AI score
+        old_normalized = max(0.0, min(1.0, 1.0 - specificity / 15.0))
+        new_normalized = max(0.0, min(1.0, 1.0 - specificity_ratio))
+        normalized = 0.4 * old_normalized + 0.6 * new_normalized
+
         contribution = normalized * self.weight
 
         if normalized > 0.70:
             interpretation = (
                 f"Мало конкретных данных (даты={dates}, числа={numbers}, "
-                f"{label_part}): текст абстрактный, характерно для ИИ"
+                f"{label_part}, юр.ссылки={specific_legal}, общие фразы={vague_admin}): "
+                f"текст абстрактный, характерно для ИИ"
             )
         elif normalized < 0.35:
             interpretation = (
-                f"Высокая предметная конкретика (specificity={specificity:.1f}/100 слов)"
+                f"Высокая предметная конкретика (specificity={specificity:.1f}/100 слов, "
+                f"юр.ссылки={specific_legal}, общие фразы={vague_admin})"
             )
         else:
-            interpretation = f"Умеренная конкретика (specificity={specificity:.1f}/100 слов)"
+            interpretation = (
+                f"Умеренная конкретика (specificity={specificity:.1f}/100 слов, "
+                f"юр.ссылки={specific_legal}, общие фразы={vague_admin})"
+            )
 
         return FeatureResult(
             feature_id=self.feature_id, name=self.name, category=self.category,

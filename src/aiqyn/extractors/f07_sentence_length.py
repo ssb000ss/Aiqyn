@@ -1,7 +1,12 @@
-"""F-07: Sentence Length Distribution — mean, std, percentiles.
+"""F-07: Sentence Length Distribution — coefficient of variation as primary metric.
 
-AI tends to produce sentences of similar, moderate length.
-Human writing shows skewed distribution with outliers.
+Key insight: absolute std is domain-dependent (formal text has longer sentences
+by nature), but CV (std/mean) is domain-agnostic:
+  - AI text (any domain): CV < 0.20 — hyper-uniform sentence lengths
+  - Human formal text:    CV 0.20–0.45 — moderate variation around longer mean
+  - Human general text:   CV > 0.35 — high variation (mix of short/long)
+
+Secondary signal: p90/p10 ratio and skewness still help.
 """
 
 from __future__ import annotations
@@ -37,6 +42,10 @@ class SentenceLengthExtractor:
         variance = sum((l - mean) ** 2 for l in lengths) / n
         std = math.sqrt(variance)
 
+        # CV (coefficient of variation): domain-agnostic uniformity measure
+        # Low CV → hyper-uniform → AI-like regardless of domain
+        cv = (std / mean) if mean > 0 else 0.0
+
         # Skewness: positive = right-skewed (more human)
         if std > 0:
             skewness = sum((l - mean) ** 3 for l in lengths) / (n * std ** 3)
@@ -48,40 +57,42 @@ class SentenceLengthExtractor:
         p90 = lengths[min(n - 1, int(n * 0.90))]
         p_ratio = (p90 / p10) if p10 > 0 else 1.0
 
-        # AI text: mean 15–25, std < 8, p_ratio < 2.5, skewness ≈ 0
-        # Human text: variable mean, std > 10, p_ratio > 3, skewness > 0.5
+        # CV score: CV < 0.20 → AI-like (1.0), CV > 0.45 → human-like (0.0)
+        # Linear interpolation: [0.20, 0.45] → [1.0, 0.0]
+        # Works for both formal (mean ~20 words) and general (mean ~10 words)
+        cv_score = max(0.0, min(1.0, (0.45 - cv) / 0.25))
 
-        # Score components (each → more AI-like = higher value)
-        # std component: low std → AI-like
-        std_score = max(0.0, min(1.0, 1.0 - (std - 3.0) / 12.0))
-        # p_ratio: low ratio → AI-like
+        # p_ratio score: low ratio → AI-like
+        # AI: p_ratio < 2.5, human: p_ratio > 3.5
         ratio_score = max(0.0, min(1.0, 1.0 - (p_ratio - 1.5) / 3.0))
-        # skewness: near-zero → AI-like
+
+        # Skewness score: near-zero → AI-like
         skew_score = max(0.0, min(1.0, 1.0 - abs(skewness) / 1.5))
 
-        normalized = 0.4 * std_score + 0.35 * ratio_score + 0.25 * skew_score
+        # CV is the primary discriminator (60%), ratio and skewness are secondary
+        normalized = 0.60 * cv_score + 0.25 * ratio_score + 0.15 * skew_score
         contribution = normalized * self.weight
 
         if normalized > 0.65:
             interpretation = (
                 f"Однородное распределение длин предложений "
-                f"(mean={mean:.1f}, std={std:.1f}): характерно для ИИ"
+                f"(mean={mean:.1f}, CV={cv:.2f}): характерно для ИИ"
             )
         elif normalized < 0.35:
             interpretation = (
-                f"Неравномерное распределение длин предложений "
-                f"(mean={mean:.1f}, std={std:.1f}): характерно для человека"
+                f"Вариативное распределение длин предложений "
+                f"(mean={mean:.1f}, CV={cv:.2f}): характерно для человека"
             )
         else:
             interpretation = (
-                f"Смешанное распределение (mean={mean:.1f}, std={std:.1f})"
+                f"Смешанное распределение (mean={mean:.1f}, CV={cv:.2f})"
             )
 
         return FeatureResult(
             feature_id=self.feature_id,
             name=self.name,
             category=self.category,
-            value=round(std, 4),
+            value=round(cv, 4),
             normalized=round(normalized, 4),
             weight=self.weight,
             contribution=round(contribution, 4),

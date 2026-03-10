@@ -75,7 +75,12 @@ class AppConfig(BaseSettings):
         "f15_style_consistency",
     ])
 
-    # Weights
+    # Text domain — affects feature weights and normalization baselines
+    # "general": everyday text, social media, blogs
+    # "formal": official documents, reports, articles, business correspondence
+    text_domain: str = "formal"  # default to formal since that's the primary use case
+
+    # Weights — general domain (everyday text, social media, blogs)
     weights: dict[str, float] = Field(default_factory=lambda: {
         "f01_perplexity": 0.25,
         "f02_burstiness": 0.20,
@@ -92,6 +97,34 @@ class AppConfig(BaseSettings):
         "f14_token_rank": 0.10,
         "f15_style_consistency": 0.06,
     })
+
+    # Weights — formal domain (official documents, reports, business correspondence)
+    # Rationale:
+    #   - f03/f07/f09/f11 downweighted: formal human text naturally looks "AI-like" on these
+    #   - f01/f05/f10/f12/f13/f15 upweighted: still discriminate in formal context
+    formal_weights: dict[str, float] = Field(default_factory=lambda: {
+        "f01_perplexity": 0.30,       # stronger — best signal in formal text
+        "f02_burstiness": 0.18,       # still good discriminator
+        "f03_token_entropy": 0.03,    # weaker — both human/AI formal use long words
+        "f04_lexical_diversity": 0.08,
+        "f05_ngram_frequency": 0.10,  # stronger — AI reuses formal bigrams
+        "f07_sentence_length": 0.06,  # weaker — formal text naturally uniform
+        "f08_punctuation_patterns": 0.04,
+        "f09_paragraph_structure": 0.03,  # weaker — formal always has structure
+        "f10_ai_phrases": 0.20,       # strongest non-LLM signal
+        "f11_emotional_neutrality": 0.02,  # almost useless — formal text IS neutral
+        "f12_coherence_smoothness": 0.10,  # good — AI over-coherent even in formal
+        "f13_weak_specificity": 0.08,  # formal human text HAS specifics (case numbers etc)
+        "f14_token_rank": 0.12,
+        "f15_style_consistency": 0.10,  # good — AI hyper-consistent even in formal
+    })
+
+    @property
+    def active_weights(self) -> dict[str, float]:
+        """Return weights for the active text domain."""
+        if self.text_domain == "formal":
+            return self.formal_weights
+        return self.weights
 
     @field_validator("log_level")
     @classmethod
