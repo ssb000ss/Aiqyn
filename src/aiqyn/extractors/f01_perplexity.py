@@ -1,7 +1,7 @@
-"""F-01: Perplexity — log-probability based on LLM.
+"""F-01: Perplexity — pseudo-perplexity via Ollama or compression fallback.
 
 Lower perplexity = text is more predictable = more likely AI-generated.
-Requires LLM (llama-cpp-python). Skipped gracefully if model unavailable.
+Uses OllamaRunner sliding-window approach or zlib compression as fallback.
 """
 
 from __future__ import annotations
@@ -15,115 +15,79 @@ from aiqyn.schemas import FeatureCategory, FeatureResult, FeatureStatus
 
 log = structlog.get_logger(__name__)
 
+# Empirically calibrated for qwen3:8b on Russian text (sliding window approach)
+_AI_PERPLEXITY = 3.0
+_HUMAN_PERPLEXITY = 12.0
+
 
 class PerplexityExtractor:
     feature_id = "f01_perplexity"
-    name = "Перплексия (LLM log-probability)"
+    name = "Перплексия (Ollama / compression)"
     category = FeatureCategory.MODEL_BASED
     requires_llm = True
     weight = 0.25
 
-    # Typical ranges (empirically calibrated for 7B models on Russian text)
-    _AI_PERPLEXITY = 8.0    # very predictable → AI
-    _HUMAN_PERPLEXITY = 35.0  # unpredictable → human
-
     def extract(self, ctx: ExtractionContext) -> FeatureResult:
-        if ctx.llm is None:
-            return FeatureResult(
-                feature_id=self.feature_id,
-                name=self.name,
-                category=self.category,
-                weight=self.weight,
-                status=FeatureStatus.SKIPPED,
-                interpretation="Модель не загружена. Запустите с --model или настройте путь к модели.",
-            )
+        # Try Ollama first (passed via ctx.llm as OllamaRunner)
+        if ctx.llm is not None:
+            return self._extract_ollama(ctx)
 
+        # Fallback: zlib compression proxy (no model needed)
+        return self._extract_compression(ctx)
+
+    def _extract_ollama(self, ctx: ExtractionContext) -> FeatureResult:
         try:
-            perplexity = self._compute_perplexity(ctx)
+            runner = ctx.llm
+            perplexity = runner.compute_pseudo_perplexity(ctx.raw_text)  # type: ignore[union-attr]
+            return self._make_result(perplexity, source="ollama")
         except Exception as exc:
-            log.error("perplexity_computation_failed", error=str(exc))
+            log.warning("perplexity_ollama_failed", error=str(exc))
+            return self._extract_compression(ctx)
+
+    def _extract_compression(self, ctx: ExtractionContext) -> FeatureResult:
+        import zlib
+        text = ctx.raw_text
+        encoded = text.encode("utf-8")
+        if len(encoded) < 50:
             return FeatureResult(
-                feature_id=self.feature_id,
-                name=self.name,
-                category=self.category,
-                weight=self.weight,
-                status=FeatureStatus.FAILED,
-                error=str(exc),
+                feature_id=self.feature_id, name=self.name,
+                category=self.category, weight=self.weight,
+                status=FeatureStatus.SKIPPED,
+                interpretation="Недостаточно текста для анализа сжатием",
             )
+        compressed = zlib.compress(encoded, level=9)
+        ratio = len(compressed) / len(encoded)
+        # Map ratio to perplexity-like value
+        perplexity = 5.0 + ratio * 60.0
+        return self._make_result(perplexity, source="compression")
 
-        # Normalize: low perplexity → AI-like (high score)
+    def _make_result(self, perplexity: float, source: str) -> FeatureResult:
         normalized = max(0.0, min(1.0, (
-            1.0 - (perplexity - self._AI_PERPLEXITY)
-            / (self._HUMAN_PERPLEXITY - self._AI_PERPLEXITY)
+            1.0 - (perplexity - _AI_PERPLEXITY) / (_HUMAN_PERPLEXITY - _AI_PERPLEXITY)
         )))
-
         contribution = normalized * self.weight
+
+        if source == "compression":
+            src_label = " [приближение через сжатие]"
+        else:
+            src_label = ""
 
         if normalized > 0.70:
             interpretation = (
-                f"Очень низкая перплексия ({perplexity:.1f}): "
-                "текст аномально предсказуем, характерно для ИИ"
+                f"Аномально предсказуемый текст (ppl≈{perplexity:.1f}){src_label}: "
+                "характерно для ИИ"
             )
         elif normalized < 0.30:
             interpretation = (
-                f"Высокая перплексия ({perplexity:.1f}): "
-                "текст непредсказуем, характерно для человека"
+                f"Непредсказуемый текст (ppl≈{perplexity:.1f}){src_label}: "
+                "характерно для человека"
             )
         else:
-            interpretation = f"Умеренная перплексия ({perplexity:.1f})"
+            interpretation = f"Умеренная предсказуемость (ppl≈{perplexity:.1f}){src_label}"
 
         return FeatureResult(
-            feature_id=self.feature_id,
-            name=self.name,
-            category=self.category,
-            value=round(perplexity, 4),
-            normalized=round(normalized, 4),
-            weight=self.weight,
-            contribution=round(contribution, 4),
+            feature_id=self.feature_id, name=self.name, category=self.category,
+            value=round(perplexity, 4), normalized=round(normalized, 4),
+            weight=self.weight, contribution=round(contribution, 4),
             interpretation=interpretation,
         )
-
-    def _compute_perplexity(self, ctx: ExtractionContext) -> float:
-        """Compute perplexity via llama-cpp logprobs."""
-        llm = ctx.llm
-
-        # Truncate to max_tokens to avoid OOM
-        text = ctx.raw_text[:8000]  # rough char limit
-
-        # Use llama-cpp tokenize + eval to get log probs
-        tokens = llm.tokenize(text.encode("utf-8"), add_bos=True)
-        if len(tokens) > 2048:
-            tokens = tokens[:2048]
-
-        if len(tokens) < 2:
-            return 20.0  # not enough data
-
-        # Evaluate and collect log probs token by token
-        total_log_prob = 0.0
-        n_tokens = 0
-
-        llm.reset()
-        for i in range(1, len(tokens)):
-            prefix = tokens[:i]
-            llm.eval(prefix)
-            logits = llm.eval_logits
-            if not logits:
-                continue
-
-            token_id = tokens[i]
-            # Convert logit to log prob via log-softmax
-            max_logit = max(logits[-1])
-            log_sum_exp = math.log(sum(math.exp(l - max_logit) for l in logits[-1])) + max_logit
-            log_prob = logits[-1][token_id] - log_sum_exp
-
-            total_log_prob += log_prob
-            n_tokens += 1
-
-            if n_tokens >= 512:  # limit computation time
-                break
-
-        if n_tokens == 0:
-            return 20.0
-
-        avg_neg_log_prob = -total_log_prob / n_tokens
-        return math.exp(avg_neg_log_prob)

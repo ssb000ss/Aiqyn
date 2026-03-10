@@ -69,13 +69,16 @@ class TextAnalyzer:
         # Preprocess
         ctx = self._preprocessor.process(text)
 
-        # Attach LLM if needed
+        # Attach LLM if needed (prefer Ollama, fallback to llama-cpp)
         llm = None
         if self._use_llm:
             manager = get_model_manager()
             if not manager.is_loaded:
-                manager.load()
-            llm = manager.get_llm()
+                manager.auto_load()
+            if manager.backend == "ollama":
+                llm = manager.get_ollama()
+            else:
+                llm = manager.get_llama()
 
         ctx_with_llm = ExtractionContext(
             raw_text=ctx.raw_text,
@@ -99,7 +102,7 @@ class TextAnalyzer:
             sentence_count=ctx.sentence_count,
             language="ru",
             analysis_time_ms=elapsed_ms,
-            model_used=str(get_model_manager().model_path) if llm else None,
+            model_used=get_model_manager().model_name if llm else None,
             version=__version__,
         )
 

@@ -44,10 +44,14 @@ class AppConfig(BaseSettings):
     segment_overlap_sentences: int = 1
     min_segment_words: int = 50
 
-    # Model
+    # Model (llama-cpp)
     model_path: str = ""
     gpu_layers: int = 0
     context_size: int = 4096
+
+    # Ollama
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen3:8b"
 
     # Thresholds
     threshold_human: float = 0.35
@@ -57,20 +61,36 @@ class AppConfig(BaseSettings):
     enabled_features: list[str] = Field(default_factory=lambda: [
         "f01_perplexity",
         "f02_burstiness",
+        "f03_token_entropy",
         "f04_lexical_diversity",
+        "f05_ngram_frequency",
         "f07_sentence_length",
+        "f08_punctuation_patterns",
+        "f09_paragraph_structure",
         "f10_ai_phrases",
         "f11_emotional_neutrality",
+        "f12_coherence_smoothness",
+        "f13_weak_specificity",
+        "f14_token_rank",
+        "f15_style_consistency",
     ])
 
-    # Weights (MVP)
+    # Weights
     weights: dict[str, float] = Field(default_factory=lambda: {
         "f01_perplexity": 0.25,
         "f02_burstiness": 0.20,
+        "f03_token_entropy": 0.06,
         "f04_lexical_diversity": 0.15,
+        "f05_ngram_frequency": 0.06,
         "f07_sentence_length": 0.15,
+        "f08_punctuation_patterns": 0.04,
+        "f09_paragraph_structure": 0.04,
         "f10_ai_phrases": 0.15,
         "f11_emotional_neutrality": 0.10,
+        "f12_coherence_smoothness": 0.06,
+        "f13_weak_specificity": 0.05,
+        "f14_token_rank": 0.10,
+        "f15_style_consistency": 0.06,
     })
 
     @field_validator("log_level")
