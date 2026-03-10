@@ -15,7 +15,7 @@ class TokenRankExtractor:
     name = "Ранг токенов (Ollama)"
     category = FeatureCategory.MODEL_BASED
     requires_llm = True
-    weight = 0.10
+    weight = 0.20  # Strong LLM-based signal — raised from 0.10
 
     def extract(self, ctx: ExtractionContext) -> FeatureResult:
         if ctx.llm is None:
@@ -43,18 +43,26 @@ class TokenRankExtractor:
             normalized = max(0.0, min(1.0, 1.0 - avg_rank))
             contribution = normalized * self.weight
 
-            if normalized > 0.65:
+            pct = round(normalized * 100)
+            if normalized > 0.85:
                 interpretation = (
-                    f"Токены аномально предсказуемы (avg_rank={avg_rank:.3f}): "
-                    "характерно для ИИ"
+                    f"Токены аномально предсказуемы ({pct}%, avg_rank={avg_rank:.3f}): "
+                    "сильный признак ИИ-генерации — модель уверенно предсказывает каждое слово"
+                )
+            elif normalized > 0.65:
+                interpretation = (
+                    f"Токены предсказуемы ({pct}%, avg_rank={avg_rank:.3f}): "
+                    "характерно для ИИ-текста"
                 )
             elif normalized < 0.35:
                 interpretation = (
-                    f"Токены непредсказуемы (avg_rank={avg_rank:.3f}): "
-                    "характерно для человека"
+                    f"Токены непредсказуемы ({pct}%, avg_rank={avg_rank:.3f}): "
+                    "характерно для живой человеческой речи"
                 )
             else:
-                interpretation = f"Умеренная предсказуемость токенов (avg_rank={avg_rank:.3f})"
+                interpretation = (
+                    f"Умеренная предсказуемость токенов ({pct}%, avg_rank={avg_rank:.3f})"
+                )
 
             return FeatureResult(
                 feature_id=self.feature_id, name=self.name, category=self.category,
