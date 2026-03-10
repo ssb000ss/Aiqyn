@@ -53,7 +53,7 @@ class DropZone(QWidget):
         urls = event.mimeData().urls()
         if urls:
             path = Path(urls[0].toLocalFile())
-            if path.exists():
+            if path.exists() and path.suffix.lower() in (".txt", ".docx", ".pdf"):
                 self.file_dropped.emit(str(path))
 
     def _reset_state(self) -> None:

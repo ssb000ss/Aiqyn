@@ -124,26 +124,8 @@ class MainView(QWidget):
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть файл:\n{exc}")
 
     def _read_file(self, path: str) -> str:
-        p = Path(path)
-        if p.suffix.lower() == ".txt":
-            return p.read_text(encoding="utf-8", errors="replace")
-        elif p.suffix.lower() == ".docx":
-            try:
-                import docx
-                doc = docx.Document(path)
-                return "\n".join(para.text for para in doc.paragraphs)
-            except ImportError:
-                raise RuntimeError("Установите python-docx: uv add python-docx")
-        elif p.suffix.lower() == ".pdf":
-            try:
-                import pdfplumber
-                with pdfplumber.open(path) as pdf:
-                    return "\n".join(
-                        page.extract_text() or "" for page in pdf.pages
-                    )
-            except ImportError:
-                raise RuntimeError("Установите pdfplumber: uv add pdfplumber")
-        return p.read_text(encoding="utf-8", errors="replace")
+        from aiqyn.utils.file_reader import read_text_from_file
+        return read_text_from_file(Path(path))
 
     def _start_analysis(self, use_llm: bool = True) -> None:
         text = self._text_edit.toPlainText().strip()

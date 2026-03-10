@@ -33,17 +33,25 @@ def main(
 
 @app.command()
 def analyze(
-    source: Annotated[str, typer.Argument(help="Path to text file, or '-' for stdin")],
+    source: Annotated[
+        str,
+        typer.Argument(help="Path to file (.txt, .docx, .pdf), or '-' for stdin"),
+    ],
     model: Annotated[str | None, typer.Option("--model", "-m", help="Path to GGUF model")] = None,
     no_llm: Annotated[bool, typer.Option("--no-llm", help="Skip LLM-based features")] = False,
     output: Annotated[str | None, typer.Option("--output", "-o", help="Output file path")] = None,
     fmt: Annotated[str, typer.Option("--format", "-f", help="Output format: json|text")] = "text",
     segments: Annotated[bool, typer.Option("--segments", help="Show per-segment analysis")] = False,
 ) -> None:
-    """Analyze text for AI-generated content."""
+    """Analyze text for AI-generated content.
+
+    Supported file formats: .txt, .docx, .pdf.
+    Pass '-' as source to read from stdin.
+    """
     from aiqyn.core.analyzer import TextAnalyzer
     from aiqyn.config import get_config
     from aiqyn.models.manager import get_model_manager
+    from aiqyn.utils.file_reader import read_text_from_file, supported_extensions
 
     # Load text
     if source == "-":
@@ -53,7 +61,19 @@ def analyze(
         if not path.exists():
             typer.echo(f"Error: file not found: {path}", err=True)
             raise typer.Exit(1)
-        text = path.read_text(encoding="utf-8", errors="replace")
+        exts = supported_extensions()
+        if path.suffix.lower() not in exts:
+            typer.echo(
+                f"Error: unsupported format {path.suffix!r}. "
+                f"Supported: {', '.join(exts)}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        try:
+            text = read_text_from_file(path)
+        except (ImportError, ValueError) as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from exc
 
     if not text.strip():
         typer.echo("Error: empty text", err=True)
@@ -175,22 +195,26 @@ if __name__ == "__main__":
 
 @app.command()
 def serve(
-    host: Annotated[str, typer.Option("--host", help="Bind host")] = "127.0.0.1",
-    port: Annotated[int, typer.Option("--port", help="Bind port")] = 8080,
-    model: Annotated[str | None, typer.Option("--model", help="Ollama model")] = None,
+    host: str = typer.Option("127.0.0.1", help="Host to bind"),
+    port: int = typer.Option(8000, help="Port to listen"),
+    reload: bool = typer.Option(False, help="Auto-reload on file changes"),
 ) -> None:
-    """Start HTTP API server (v1.5+ feature, requires fastapi)."""
+    """Start REST API server."""
     try:
-        import fastapi  # noqa: F401
+        import uvicorn
+        from aiqyn.api.app import create_app  # noqa: F401 — validates import
     except ImportError:
-        typer.echo("FastAPI not installed. Run: uv add fastapi uvicorn", err=True)
+        typer.echo("Install fastapi and uvicorn: uv add fastapi uvicorn[standard]", err=True)
         raise typer.Exit(1)
 
-    from aiqyn.logging import setup_logging
-    setup_logging()
-    typer.echo(f"Starting API server on {host}:{port} (not yet implemented)")
-    typer.echo("This feature is planned for v1.5")
-    raise typer.Exit(0)
+    typer.echo(f"Starting Aiqyn API on http://{host}:{port}")
+    uvicorn.run(
+        "aiqyn.api.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
 
 
 @app.command()
