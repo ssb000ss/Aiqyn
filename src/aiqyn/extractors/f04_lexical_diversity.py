@@ -17,7 +17,9 @@ class LexicalDiversityExtractor:
     weight = 0.15
 
     def extract(self, ctx: ExtractionContext) -> FeatureResult:
-        words = [t.lower() for t in ctx.tokens if t.isalpha() and len(t) > 2]
+        # Use lemmas: normalises inflected Russian forms → more accurate TTR/hapax.
+        # ctx.lemmas falls back to alpha surface tokens when spaCy unavailable.
+        words = [w for w in ctx.lemmas if len(w) > 2]
 
         if len(words) < 20:
             return FeatureResult(

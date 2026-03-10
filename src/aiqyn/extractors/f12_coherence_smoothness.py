@@ -34,11 +34,31 @@ class CoherenceSmoothnessExtractor:
                 interpretation="Недостаточно предложений (нужно ≥ 4)",
             )
 
-        # Word-set Jaccard similarity between adjacent sentences
-        sent_words = [
-            {w.lower() for w in s.split() if w.isalpha() and len(w) > 3}
-            for s in sentences
-        ]
+        # Build per-sentence lemma sets for Jaccard similarity.
+        # spaCy gives much better results: lemmas collapse inflected forms and
+        # we filter to content POS only (NOUN, ADJ, VERB) to reduce noise.
+        if ctx.spacy_doc is not None:
+            sent_words = [
+                {
+                    t.lemma_.lower()
+                    for t in sent
+                    if t.is_alpha and len(t.lemma_) > 3 and t.pos_ in {"NOUN", "ADJ", "VERB"}
+                }
+                for sent in ctx.spacy_doc.sents
+            ]
+            # spaCy sentence count may differ from razdel; re-check minimum
+            if len(sent_words) < 4:
+                return FeatureResult(
+                    feature_id=self.feature_id, name=self.name,
+                    category=self.category, weight=self.weight,
+                    status=FeatureStatus.SKIPPED,
+                    interpretation="Недостаточно предложений (нужно ≥ 4)",
+                )
+        else:
+            sent_words = [
+                {w.lower() for w in s.split() if w.isalpha() and len(w) > 3}
+                for s in sentences
+            ]
 
         similarities = [
             _jaccard(sent_words[i], sent_words[i + 1])

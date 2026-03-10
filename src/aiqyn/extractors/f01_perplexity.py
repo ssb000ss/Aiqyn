@@ -45,21 +45,57 @@ class PerplexityExtractor:
             return self._extract_compression(ctx)
 
     def _extract_compression(self, ctx: ExtractionContext) -> FeatureResult:
+        """Compression-ratio fallback — separate calibration from Ollama path.
+
+        AI text (structured, repetitive vocabulary) compresses better → lower ratio.
+        Human text (varied, idiomatic) is less compressible → higher ratio.
+
+        Empirical ranges for Russian text (UTF-8 encoded):
+          AI  ratio ≈ 0.38–0.50, Human ratio ≈ 0.46–0.62
+        Weight reduced to 0.08 (vs 0.25 for Ollama) to reflect lower reliability.
+        """
         import zlib
         text = ctx.raw_text
         encoded = text.encode("utf-8")
-        if len(encoded) < 50:
+        if len(encoded) < 200:
             return FeatureResult(
                 feature_id=self.feature_id, name=self.name,
                 category=self.category, weight=self.weight,
                 status=FeatureStatus.SKIPPED,
-                interpretation="Недостаточно текста для анализа сжатием",
+                interpretation="Недостаточно текста для анализа сжатием (нужно ≥ 200 байт)",
             )
         compressed = zlib.compress(encoded, level=9)
         ratio = len(compressed) / len(encoded)
-        # Map ratio to perplexity-like value
-        perplexity = 5.0 + ratio * 60.0
-        return self._make_result(perplexity, source="compression")
+
+        # Map [0.55 → 0.0, 0.38 → 1.0]: lower ratio = more compressible = AI-like
+        normalized = max(0.0, min(1.0, (0.55 - ratio) / 0.17))
+
+        # Reduced weight for weaker compression signal
+        effective_weight = 0.08
+        contribution = normalized * effective_weight
+
+        if normalized > 0.65:
+            interpretation = (
+                f"Высокая сжимаемость текста (ratio={ratio:.3f}): "
+                "структурированный словарь, возможен ИИ [прокси без модели]"
+            )
+        elif normalized < 0.30:
+            interpretation = (
+                f"Низкая сжимаемость (ratio={ratio:.3f}): "
+                "разнообразный текст, характерно для человека [прокси без модели]"
+            )
+        else:
+            interpretation = (
+                f"Умеренная сжимаемость (ratio={ratio:.3f}) [прокси без модели]"
+            )
+
+        return FeatureResult(
+            feature_id=self.feature_id, name=self.name, category=self.category,
+            value=round(ratio, 4), normalized=round(normalized, 4),
+            weight=effective_weight,
+            contribution=round(contribution, 4),
+            interpretation=interpretation,
+        )
 
     def _make_result(self, perplexity: float, source: str) -> FeatureResult:
         normalized = max(0.0, min(1.0, (

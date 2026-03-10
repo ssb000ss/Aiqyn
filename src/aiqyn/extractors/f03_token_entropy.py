@@ -1,12 +1,18 @@
-"""F-03: Token Entropy — Shannon entropy of token distribution.
+"""F-03: Formal Vocabulary Register.
 
-AI text tends to use tokens more uniformly, humans show more peaked/skewed distributions.
+Two complementary stylometric signals that discriminate AI from human Russian:
+
+1. Mean content-word length — AI uses longer, more formal words.
+   Observed: AI ≈ 7.5–9.5 chars, human ≈ 5.5–7.5 chars.
+
+2. Noun-Verb Ratio (NVR) — AI text is nominalized (more nouns relative to verbs),
+   human text is more verbal.
+   Observed: AI NVR ≈ 1.2–3.0, human NVR ≈ 0.5–1.3.
+
+When spaCy is unavailable, only word-length signal is used.
 """
 
 from __future__ import annotations
-
-import math
-from collections import Counter
 
 from aiqyn.extractors.base import ExtractionContext
 from aiqyn.schemas import FeatureCategory, FeatureResult, FeatureStatus
@@ -14,58 +20,65 @@ from aiqyn.schemas import FeatureCategory, FeatureResult, FeatureStatus
 
 class TokenEntropyExtractor:
     feature_id = "f03_token_entropy"
-    name = "Энтропия токенов"
+    name = "Формальность лексики"
     category = FeatureCategory.STATISTICAL
     requires_llm = False
     weight = 0.06
 
     def extract(self, ctx: ExtractionContext) -> FeatureResult:
-        words = [t.lower() for t in ctx.tokens if t.isalpha() and len(t) > 1]
-        if len(words) < 20:
+        words = ctx.content_lemmas
+        if len(words) < 10:
             return FeatureResult(
                 feature_id=self.feature_id, name=self.name,
                 category=self.category, weight=self.weight,
                 status=FeatureStatus.SKIPPED,
-                interpretation="Недостаточно слов (нужно ≥ 20)",
+                interpretation="Недостаточно слов (нужно ≥ 10)",
             )
 
-        freq = Counter(words)
-        total = len(words)
+        # Signal 1: mean content-word length.
+        # AI formal vocabulary → longer words.
+        # Map [5.5, 9.5] → [0.0, 1.0]
+        mean_len = sum(len(w) for w in words) / len(words)
+        len_score = max(0.0, min(1.0, (mean_len - 5.5) / 4.0))
 
-        # Shannon entropy H = -sum(p * log2(p))
-        entropy = -sum(
-            (count / total) * math.log2(count / total)
-            for count in freq.values()
-        )
+        # Signal 2: Noun-Verb Ratio (requires spaCy POS tags).
+        # AI nominalization → NVR > 1.2; human text → NVR < 1.0.
+        # Map [0.7, 2.0] → [0.0, 1.0]
+        nvr_score = 0.5  # neutral fallback when no POS available
+        nvr: float | None = None
+        if ctx.token_info:
+            nouns = sum(1 for _, _, pos in ctx.token_info if pos == "NOUN")
+            verbs = sum(1 for _, _, pos in ctx.token_info if pos == "VERB")
+            if verbs > 0:
+                nvr = nouns / verbs
+                nvr_score = max(0.0, min(1.0, (nvr - 0.7) / 1.3))
+            elif nouns > 0:
+                nvr_score = 1.0  # all nouns, no verbs → strongly AI
 
-        # Max possible entropy = log2(unique_words)
-        max_entropy = math.log2(len(freq)) if len(freq) > 1 else 1.0
-        # Normalized entropy (0–1): 1 = max diversity
-        norm_entropy = entropy / max_entropy if max_entropy > 0 else 0.5
-
-        # AI text: high uniform entropy → norm_entropy closer to 1
-        # Human text: more skewed → lower norm_entropy
-        # Score: higher norm_entropy → more AI-like
-        normalized = max(0.0, min(1.0, (norm_entropy - 0.70) / 0.25))
+        # Combined score
+        if nvr is not None:
+            normalized = 0.5 * len_score + 0.5 * nvr_score
+            detail = f"длина слов={mean_len:.1f}, NVR={nvr:.2f}"
+        else:
+            normalized = len_score
+            detail = f"длина слов={mean_len:.1f}"
 
         contribution = normalized * self.weight
 
         if normalized > 0.6:
             interpretation = (
-                f"Высокая равномерность токенов (H={entropy:.2f}, норм={norm_entropy:.2f}): "
-                "характерно для ИИ"
+                f"Формальная лексика ({detail}): характерно для ИИ"
             )
         elif normalized < 0.3:
             interpretation = (
-                f"Неравномерное распределение токенов (H={entropy:.2f}, норм={norm_entropy:.2f}): "
-                "характерно для человека"
+                f"Разговорная лексика ({detail}): характерно для человека"
             )
         else:
-            interpretation = f"Умеренная энтропия токенов (H={entropy:.2f})"
+            interpretation = f"Умеренная формальность ({detail})"
 
         return FeatureResult(
             feature_id=self.feature_id, name=self.name, category=self.category,
-            value=round(entropy, 4), normalized=round(normalized, 4),
+            value=round(mean_len, 4), normalized=round(normalized, 4),
             weight=self.weight, contribution=round(contribution, 4),
             interpretation=interpretation,
         )

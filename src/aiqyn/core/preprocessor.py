@@ -66,10 +66,7 @@ class TextPreprocessor:
             return
         try:
             import spacy
-            TextPreprocessor._spacy_nlp = spacy.load(
-                self._spacy_model,
-                disable=["ner"],  # we load NER separately when needed
-            )
+            TextPreprocessor._spacy_nlp = spacy.load(self._spacy_model)
             log.info("spacy_loaded", model=self._spacy_model)
         except OSError:
             log.warning(
@@ -87,8 +84,17 @@ class TextPreprocessor:
 
         self._load_spacy_model()
         spacy_doc = None
+        token_info: list[tuple[str, str, str]] = []
+        ner_spans: list[tuple[str, str]] = []
+
         if TextPreprocessor._spacy_nlp is not None:
             spacy_doc = TextPreprocessor._spacy_nlp(text)
+            token_info = [
+                (t.text, t.lemma_, t.pos_)
+                for t in spacy_doc
+                if not t.is_space
+            ]
+            ner_spans = [(ent.text, ent.label_) for ent in spacy_doc.ents]
 
         log.debug(
             "text_preprocessed",
@@ -96,6 +102,7 @@ class TextPreprocessor:
             tokens=len(tokens),
             sentences=len(sentences),
             spacy=spacy_doc is not None,
+            ner_count=len(ner_spans),
         )
 
         return ExtractionContext(
@@ -103,4 +110,6 @@ class TextPreprocessor:
             tokens=tokens,
             sentences=sentences,
             spacy_doc=spacy_doc,
+            token_info=token_info,
+            ner_spans=ner_spans,
         )

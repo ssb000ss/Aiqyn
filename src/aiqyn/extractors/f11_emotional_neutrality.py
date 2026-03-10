@@ -11,26 +11,40 @@ import re
 from aiqyn.extractors.base import ExtractionContext
 from aiqyn.schemas import FeatureCategory, FeatureResult, FeatureStatus
 
-# Minimal Russian emotional lexicon (positive / negative markers)
+# Russian emotional lexicon — positive, negative, intensifiers, hedges
 _POSITIVE_WORDS = {
+    # Lemma forms — matched against ctx.lemmas (spaCy) or surface tokens (fallback)
     "отличный", "прекрасный", "замечательный", "превосходный", "великолепный",
     "блестящий", "восхитительный", "радостный", "счастливый", "успешный",
     "удачный", "любить", "обожать", "восторг", "восхищение", "радость",
-    "хорошо", "хороший", "лучший", "лучше", "нравится", "нравиться",
+    "хорошо", "хороший", "лучший", "лучше", "нравиться",
     "спасибо", "благодарность", "интересный", "увлекательный",
+    "круто", "классно", "классный", "супер", "здорово", "забавный",
+    "любимый", "дорогой", "приятный", "приятно",
+    "удовольствие", "наслаждение", "радоваться", "весело", "улыбка",
 }
 
 _NEGATIVE_WORDS = {
-    "плохой", "ужасный", "отвратительный", "кошмарный", "страшный",
-    "тяжёлый", "трудный", "проблема", "беда", "горе", "грусть", "печаль",
-    "злость", "гнев", "ненависть", "ненавидеть", "бояться", "страх",
-    "боль", "страдание", "несчастный", "бедный", "плохо", "хуже",
+    # Lemma forms. spaCy lemmatizes adverbs to their own form, not the adj form,
+    # so both "тяжёлый" (adj) and "тяжело" (adv) need to be listed separately.
+    "плохой", "плохо", "ужасный", "отвратительный", "кошмарный", "страшный",
+    "тяжёлый", "тяжело", "трудный", "трудно", "проблема", "беда", "горе",
+    "грусть", "печаль", "злость", "гнев", "ненависть", "ненавидеть",
+    "бояться", "страх", "боль", "страдание", "несчастный", "плохо", "хуже",
     "сложный", "невозможный", "бесполезный", "опасный",
+    "разочарование", "разочарованный", "обидно", "обида", "неприятный",
+    "скучный", "скучно", "скука", "злой", "грустно", "больно",
+    "неудача", "провал", "ошибка", "жалко", "тревога", "тревожно",
+    "уставший", "усталость", "надоесть", "раздражение",
+    "картонный", "деревянный",
 }
 
 _INTENSIFIERS = {
     "очень", "крайне", "чрезвычайно", "абсолютно", "совершенно",
     "просто", "явно", "безусловно", "несомненно", "поразительно",
+    # subjective hedges and opinion markers — typical of human writing
+    "честно", "пожалуй", "наверное", "кажется", "по-моему",
+    "вроде", "вообще-то", "откровенно", "признаться", "действительно",
 }
 
 _EXCLAMATION_RE = re.compile(r"!")
@@ -56,7 +70,9 @@ class EmotionalNeutralityExtractor:
             )
 
         total = len(words)
-        word_set = set(words)
+        # Use lemmas for lexicon lookup: matches inflected forms against base forms.
+        # ctx.lemmas falls back to alpha surface tokens when spaCy unavailable.
+        word_set = set(ctx.lemmas) if ctx.token_info else set(words)
 
         positive_count = len(word_set & _POSITIVE_WORDS)
         negative_count = len(word_set & _NEGATIVE_WORDS)

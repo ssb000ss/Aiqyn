@@ -39,10 +39,26 @@ class WeakSpecificityExtractor:
 
         dates = len(_DATE_RE.findall(text))
         numbers = len(_NUMBER_RE.findall(text))
-        proper_nouns = len(_PROPER_UPPER_RE.findall(text))
+
+        if ctx.ner_spans:
+            # spaCy NER is far more precise than regex capitalization heuristics.
+            # Count unique entity mentions; also add PROPN tokens not caught by NER.
+            ner_entities = len(ctx.ner_spans)
+            propn_count = (
+                sum(1 for _, _, pos in ctx.token_info if pos == "PROPN")
+                if ctx.token_info else 0
+            )
+            # Avoid double-counting: take max rather than sum to stay conservative
+            specific_count = dates + numbers + max(ner_entities, propn_count)
+            label_part = f"NER={ner_entities}"
+        else:
+            # Fallback: capitalized Russian words heuristic
+            proper_nouns = len(_PROPER_UPPER_RE.findall(text))
+            specific_count = dates + numbers + proper_nouns
+            label_part = f"имена≈{proper_nouns}"
 
         # Specificity density: concrete anchors per 100 words
-        specificity = (dates + numbers + proper_nouns) / n_words * 100
+        specificity = specific_count / n_words * 100
 
         # Low specificity → AI-like (abstract, no concrete anchors)
         # High specificity → human-like (cites real things)
@@ -52,7 +68,7 @@ class WeakSpecificityExtractor:
         if normalized > 0.70:
             interpretation = (
                 f"Мало конкретных данных (даты={dates}, числа={numbers}, "
-                f"имена≈{proper_nouns}): текст абстрактный, характерно для ИИ"
+                f"{label_part}): текст абстрактный, характерно для ИИ"
             )
         elif normalized < 0.35:
             interpretation = (
