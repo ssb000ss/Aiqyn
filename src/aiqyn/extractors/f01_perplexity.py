@@ -15,9 +15,12 @@ from aiqyn.schemas import FeatureCategory, FeatureResult, FeatureStatus
 
 log = structlog.get_logger(__name__)
 
-# Empirically calibrated for qwen3:8b on Russian text (sliding window approach)
-_AI_PERPLEXITY = 3.0
-_HUMAN_PERPLEXITY = 12.0
+# Calibrated for word-overlap pseudo-perplexity (OllamaRunner sliding-window).
+# AI text (repetitive structure) → high overlap → perplexity ≈ 1.0–2.0
+# Human text (varied) → low overlap → perplexity ≈ 3.0–10.0
+# exp(log(overlap)): AI overlap ~0.60 → ppl≈1.7, Human overlap ~0.20 → ppl≈5
+_AI_PERPLEXITY = 1.5
+_HUMAN_PERPLEXITY = 6.0
 
 
 class PerplexityExtractor:

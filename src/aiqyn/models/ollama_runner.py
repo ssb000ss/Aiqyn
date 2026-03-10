@@ -87,38 +87,48 @@ class OllamaRunner:
         return perplexity
 
     def _score_continuation(self, prefix: str, target: str) -> float:
-        """Get average logprob of target tokens generated after prefix."""
-        prompt = (
-            f"Продолжи текст естественно и без изменений: {prefix}"
-        )
+        """Score how well the model predicts the target text from the prefix.
+
+        Uses word-overlap between the model's greedy continuation and the
+        actual target.  This avoids the greedy-logprob collapse (with
+        temperature=0 the model always picks the top token so logprob≈0 for
+        every text regardless of origin).
+
+        Returns a pseudo log-prob value in range ~ [-4, 0]:
+            near 0     → high overlap → predictable → AI-like
+            very negative → low overlap → unpredictable → human-like
+        """
+        prompt = f"Продолжи текст: {prefix}"
+        n_words = len(target.split())
         payload = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "logprobs": True,
             "options": {
                 "temperature": 0.0,
-                "num_predict": len(target.split()) + 5,
+                "num_predict": n_words + 5,
                 "num_ctx": 2048,
             },
         }
         if "qwen3" in self.model:
-            payload["think"] = False  # disable thinking mode for speed
+            payload["think"] = False  # disable extended thinking for speed
 
         r = self._client.post("/api/generate", json=payload)
         r.raise_for_status()
-        data = r.json()
+        generated = r.json().get("response", "").strip()
 
-        logprobs: list[dict] = data.get("logprobs", [])
-        if not logprobs:
-            return -3.0  # fallback neutral value
+        # Word-level overlap: fraction of target words that appear in generated
+        gen_words = set(generated.lower().split())
+        tgt_words = [w.lower() for w in target.split() if w.isalpha()]
+        if not gen_words or not tgt_words:
+            return -3.0  # neutral fallback
 
-        # Use the first N logprobs (corresponding to our window)
-        lps = [entry["logprob"] for entry in logprobs[:len(target.split()) + 3]]
-        if not lps:
-            return -3.0
+        overlap = sum(1 for w in tgt_words if w in gen_words) / len(tgt_words)
 
-        return sum(lps) / len(lps)
+        # Map overlap [0, 1] → pseudo log-prob ~ [-4, 0]:
+        # high overlap (AI text) → near 0
+        # low overlap (human text) → near -4
+        return math.log(max(overlap, 0.018))  # log(0.018) ≈ -4.0
 
     def get_token_ranks(self, text: str) -> list[float]:
         """Get normalized rank scores for text tokens via Ollama.
