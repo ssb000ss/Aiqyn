@@ -16,9 +16,13 @@ name = "aiqyn"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyside6" },
     { name = "razdel" },
+    { name = "reportlab" },
     { name = "structlog" },
     { name = "typer" },
 ]
@@ -63,18 +67,22 @@ ui = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.20" },
     { name = "aiosqlite", marker = "extra == 'db'", specifier = ">=0.20" },
     { name = "aiqyn", extras = ["nlp", "llm", "ui", "db", "ml"], marker = "extra == 'all'" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.3" },
     { name = "llama-cpp-python", marker = "extra == 'llm'", specifier = ">=0.2.80" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "numpy", marker = "extra == 'ml'", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
+    { name = "pyside6", specifier = ">=6.7" },
     { name = "pyside6", marker = "extra == 'ui'", specifier = ">=6.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "razdel", specifier = ">=0.5" },
+    { name = "reportlab", specifier = ">=4.2" },
     { name = "reportlab", marker = "extra == 'ui'", specifier = ">=4.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "scipy", marker = "extra == 'ml'", specifier = ">=1.13" },

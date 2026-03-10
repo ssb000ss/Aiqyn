@@ -9,6 +9,10 @@ dependencies = [
     "structlog>=24.1",
     "razdel>=0.5",
     "typer>=0.12",
+    "httpx>=0.28.1",
+    "pyside6>=6.7",
+    "aiosqlite>=0.20",
+    "reportlab>=4.2",
 ]
 
 [project.optional-dependencies]
