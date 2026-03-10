@@ -1,0 +1,35 @@
+FROM python:3.12-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --extra nlp --extra llm --extra db --no-dev --no-install-project
+
+COPY src/ ./src/
+RUN uv run python -m spacy download ru_core_news_sm
+
+# ---- runtime ----
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/.venv ./.venv
+COPY --from=builder /app/src ./src
+COPY config/ ./config/
+COPY data/ ./data/
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
+    CMD python -c "from aiqyn import __version__; print(__version__)"
+
+EXPOSE 8080
+CMD ["python", "-m", "aiqyn", "serve", "--host", "0.0.0.0", "--port", "8080"]

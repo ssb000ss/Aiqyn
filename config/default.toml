@@ -1,0 +1,47 @@
+[app]
+name = "Aiqyn"
+version = "0.1.0"
+log_level = "INFO"
+theme = "dark"
+
+[analysis]
+max_text_length = 50000
+min_text_length = 50
+max_tokens_llm = 4096
+segment_size_sentences = 4
+segment_overlap_sentences = 1
+min_segment_words = 50
+
+[model]
+path = ""  # auto-detect from default locations
+gpu_layers = 0  # 0 = CPU only; -1 = all layers on GPU
+context_size = 4096
+temperature = 0.0
+
+[thresholds]
+human = 0.35
+mixed = 0.65
+ai_generated = 0.65
+
+[weights]
+# Phase 1 weights (rule-based MVP)
+f01_perplexity = 0.25
+f02_burstiness = 0.20
+f04_lexical_diversity = 0.15
+f07_sentence_length = 0.15
+f10_ai_phrases = 0.15
+f11_emotional_neutrality = 0.10
+
+[features]
+enabled = [
+    "f01_perplexity",
+    "f02_burstiness",
+    "f04_lexical_diversity",
+    "f07_sentence_length",
+    "f10_ai_phrases",
+    "f11_emotional_neutrality",
+]
+
+[storage]
+history_max_items = 1000
+export_dir = ""  # empty = user's Documents folder

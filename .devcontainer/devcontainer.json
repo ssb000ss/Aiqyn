@@ -1,0 +1,22 @@
+{
+  "name": "Aiqyn Dev",
+  "build": { "dockerfile": "Dockerfile" },
+  "mounts": [
+    "source=${localWorkspaceFolder}/models,target=/workspace/models,type=bind,consistency=cached"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "postCreateCommand": "uv sync --extra dev",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.mypy-type-checker",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  },
+  "remoteUser": "root"
+}
