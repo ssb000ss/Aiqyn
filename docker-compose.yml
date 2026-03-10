@@ -1,0 +1,45 @@
+services:
+  aiqyn:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Calibration data, phrase dictionaries — writable so the app can update them
+      - ./data:/app/data
+      # SQLite history DB — persisted across container restarts
+      - aiqyn_db:/app/data/db
+    environment:
+      - AIQYN_LOG_LEVEL=INFO
+      # LLM disabled by default in Docker (no Ollama service unless uncommented below)
+      - AIQYN_USE_LLM=false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s   # give spaCy model time to load
+
+  # -------------------------------------------------------------------------
+  # Optional: Ollama for LLM-based features
+  # Uncomment this block and set AIQYN_USE_LLM=true above to enable.
+  # -------------------------------------------------------------------------
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_models:/root/.ollama
+  #   restart: unless-stopped
+  #   # GPU passthrough (requires nvidia-container-toolkit):
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: all
+  #   #           capabilities: [gpu]
+
+volumes:
+  aiqyn_db:
+  # ollama_models:   # uncomment together with the ollama service

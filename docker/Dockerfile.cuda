@@ -1,0 +1,41 @@
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 python3.12-dev python3.12-venv \
+    build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+
+ENV CMAKE_ARGS="-DLLAMA_CUBLAS=on"
+ENV FORCE_CMAKE=1
+RUN uv sync --extra nlp --extra llm --extra db --no-dev --no-install-project
+
+COPY src/ ./src/
+RUN uv run python3.12 -m spacy download ru_core_news_sm
+
+# ---- runtime ----
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/.venv ./.venv
+COPY --from=builder /app/src ./src
+COPY config/ ./config/
+COPY data/ ./data/
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
+    CMD python3.12 -c "from aiqyn import __version__; print(__version__)"
+
+EXPOSE 8080
+CMD ["python3.12", "-m", "aiqyn", "serve", "--host", "0.0.0.0", "--port", "8080"]

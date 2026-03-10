@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aiqyn — Детектор ИИ-текста</title>
+
+  <!-- Tailwind CSS via CDN (play mode — JIT in browser) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg:          '#0F1117',
+            surface:     '#161B27',
+            card:        '#1C2333',
+            accent:      '#3B82F6',
+            'accent-hover': '#2563EB',
+            'text-primary':   '#F1F5F9',
+            'text-secondary': '#94A3B8',
+            'text-muted':     '#475569',
+            border:      '#1E2D45',
+            'score-human': '#22C55E',
+            'score-mixed': '#F59E0B',
+            'score-ai':    '#EF4444',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Alpine.js v3 -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Base                                                                 */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      background: #0F1117;
+      color: #F1F5F9;
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* Thin custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #161B27; }
+    ::-webkit-scrollbar-thumb { background: #1E2D45; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3B82F6; }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout shell                                                         */
+    /* ------------------------------------------------------------------ */
+    html, body { height: 100%; overflow: hidden; }
+
+    .layout {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: #161B27;
+      border-right: 1px solid #1E2D45;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 12px;
+    }
+
+    .main-content {
+      flex: 1;
+      min-width: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 40px 48px;
+    }
+
+    /* Analyze tab: stretch to fill viewport height */
+    .analyze-shell {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 80px);
+    }
+    .analyze-shell .drop-zone {
+      padding: 16px 24px;
+      flex-shrink: 0;
+    }
+    .analyze-shell .drop-zone svg { width: 28px; height: 28px; }
+    .analyze-shell .textarea-grow {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .analyze-shell .textarea-grow textarea {
+      flex: 1;
+      min-height: 0;
+      resize: none;
+    }
+
+    /* Stat chip in hero card */
+    .stat-chip {
+      background: #161B27;
+      border: 1px solid #1E2D45;
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: #475569;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .stat-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: #F1F5F9;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Sidebar nav                                                          */
+    /* ------------------------------------------------------------------ */
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #94A3B8;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+      text-align: left;
+    }
+    .nav-btn:hover {
+      background: #1C2333;
+      color: #F1F5F9;
+    }
+    .nav-btn.active {
+      background: rgba(59, 130, 246, 0.15);
+      color: #F1F5F9;
+    }
+    .nav-btn.active .nav-icon {
+      color: #3B82F6;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Cards                                                                */
+    /* ------------------------------------------------------------------ */
+    .card {
+      background: #1C2333;
+      border: 1px solid #1E2D45;
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Upload drop-zone                                                     */
+    /* ------------------------------------------------------------------ */
+    .drop-zone {
+      border: 2px dashed #1E2D45;
+      border-radius: 10px;
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-zone:hover,
+    .drop-zone.drag-over {
+      border-color: #3B82F6;
+      background: rgba(59, 130, 246, 0.05);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Textarea                                                             */
+    /* ------------------------------------------------------------------ */
+    .text-input {
+      width: 100%;
+      min-height: 180px;
+      background: #161B27;
+      border: 1px solid #1E2D45;
+      border-radius: 10px;
+      padding: 16px;
+      color: #F1F5F9;
+      font-size: 15px;
+      line-height: 1.6;
+      resize: none;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .text-input::placeholder { color: #475569; }
+    .text-input:focus { border-color: #3B82F6; }
+
+    /* ------------------------------------------------------------------ */
+    /* Buttons                                                              */
+    /* ------------------------------------------------------------------ */
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: #3B82F6;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-primary:hover:not(:disabled) { background: #2563EB; }
+    .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+    .btn-primary:disabled {
+      background: #1E2D45;
+      color: #475569;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: #1C2333;
+      color: #94A3B8;
+      font-size: 14px;
+      font-weight: 500;
+      border: 1px solid #1E2D45;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn-secondary:hover { background: #1E2D45; color: #F1F5F9; border-color: #3B82F6; }
+
+    .btn-danger {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: transparent;
+      color: #EF4444;
+      font-size: 13px;
+      font-weight: 500;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.1); border-color: #EF4444; }
+
+    /* ------------------------------------------------------------------ */
+    /* Spinner                                                              */
+    /* ------------------------------------------------------------------ */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #1E2D45;
+      border-top-color: #3B82F6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Feature row progress bar                                             */
+    /* ------------------------------------------------------------------ */
+    .feature-bar-track {
+      flex: 1;
+      height: 6px;
+      background: #161B27;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .feature-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Confidence badge                                                     */
+    /* ------------------------------------------------------------------ */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Heatmap sentence tokens                                              */
+    /* ------------------------------------------------------------------ */
+    .heatmap-sentence {
+      display: inline;
+      padding: 1px 2px;
+      border-radius: 3px;
+      transition: opacity 0.2s;
+      cursor: default;
+    }
+    .heatmap-sentence:hover { opacity: 0.85; }
+
+    /* ------------------------------------------------------------------ */
+    /* Accordion                                                            */
+    /* ------------------------------------------------------------------ */
+    .accordion-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      padding: 10px 0;
+      border-bottom: 1px solid #1E2D45;
+    }
+    .accordion-header:first-child { padding-top: 0; }
+
+    /* ------------------------------------------------------------------ */
+    /* History card                                                         */
+    /* ------------------------------------------------------------------ */
+    .history-card {
+      background: #1C2333;
+      border: 1px solid #1E2D45;
+      border-radius: 10px;
+      padding: 16px 20px;
+      transition: border-color 0.15s;
+    }
+    .history-card:hover { border-color: #3B82F6; }
+
+    /* ------------------------------------------------------------------ */
+    /* Notifications (toast)                                                */
+    /* ------------------------------------------------------------------ */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 1000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      pointer-events: none;
+      animation: toastIn 0.2s ease;
+    }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================================================================
+     ROOT Alpine.js component
+     State: tab, inputText, wordCount, charCount, analyzing, result, history
+====================================================================== -->
+<div
+  class="layout"
+  x-data="aiqynApp()"
+  x-init="init()"
+  @dragover.prevent="dropZoneDragOver = true"
+  @dragleave="dropZoneDragOver = false"
+>
+
+  <!-- ================================================================== -->
+  <!-- SIDEBAR                                                              -->
+  <!-- ================================================================== -->
+  <aside class="sidebar" role="navigation" aria-label="Навигация">
+    <!-- Logo -->
+    <div class="flex items-center gap-2 mb-8 px-2">
+      <span class="text-xl font-bold text-text-primary">Aiqyn</span>
+      <span class="w-2 h-2 rounded-full bg-accent flex-shrink-0" aria-hidden="true"></span>
+    </div>
+
+    <!-- Nav items -->
+    <nav class="flex flex-col gap-1" role="list">
+      <button
+        class="nav-btn"
+        :class="{ active: tab === 'analyze' }"
+        @click="tab = 'analyze'"
+        aria-current="tab === 'analyze' ? 'page' : undefined"
+        role="listitem"
+      >
+        <!-- Document icon -->
+        <svg class="nav-icon w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Анализ
+      </button>
+
+      <button
+        class="nav-btn"
+        :class="{ active: tab === 'history' }"
+        @click="tab = 'history'; loadHistory()"
+        role="listitem"
+      >
+        <!-- Clock icon -->
+        <svg class="nav-icon w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        История
+      </button>
+
+      <button
+        class="nav-btn"
+        :class="{ active: tab === 'settings' }"
+        @click="tab = 'settings'; loadStatus()"
+        role="listitem"
+      >
+        <!-- Settings icon -->
+        <svg class="nav-icon w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        Настройки
+      </button>
+    </nav>
+
+    <!-- Version at bottom -->
+    <div class="mt-auto px-2">
+      <span class="text-xs text-text-muted">v0.1.0</span>
+    </div>
+  </aside>
+
+  <!-- ================================================================== -->
+  <!-- MAIN CONTENT                                                         -->
+  <!-- ================================================================== -->
+  <main class="main-content" id="main-content">
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- TAB: Анализ                                                       -->
+    <!-- ---------------------------------------------------------------- -->
+    <section x-show="tab === 'analyze' && !result" x-cloak class="analyze-shell">
+      <!-- Page header -->
+      <header class="mb-4 flex-shrink-0">
+        <h1 class="text-2xl font-bold text-text-primary mb-1">Анализ текста</h1>
+        <p class="text-text-secondary text-sm">Вставьте текст или загрузите файл для проверки</p>
+      </header>
+
+      <!-- Upload drop-zone -->
+      <div
+        class="drop-zone mb-3 flex-shrink-0"
+        :class="{ 'drag-over': dropZoneDragOver }"
+        @click="$refs.fileInput.click()"
+        @drop.prevent="handleFileDrop($event)"
+        @dragover.prevent="dropZoneDragOver = true"
+        @dragleave="dropZoneDragOver = false"
+        role="button"
+        tabindex="0"
+        aria-label="Зона загрузки файла. Нажмите или перетащите файл"
+        @keydown.enter="$refs.fileInput.click()"
+        @keydown.space.prevent="$refs.fileInput.click()"
+      >
+        <!-- File icon -->
+        <svg class="w-10 h-10 text-text-muted mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+        </svg>
+        <p class="text-text-secondary text-sm">
+          Перетащите файл или <span class="text-accent">выберите</span>
+        </p>
+        <p class="text-text-muted text-xs mt-1">.txt, .docx, .pdf</p>
+
+        <!-- Hidden file input -->
+        <input
+          type="file"
+          accept=".txt,.docx,.pdf"
+          class="hidden"
+          x-ref="fileInput"
+          @change="handleFileSelect($event)"
+          aria-hidden="true"
+          tabindex="-1"
+        />
+      </div>
+
+      <!-- Textarea -->
+      <div class="textarea-grow mb-3">
+        <label for="text-input" class="sr-only">Текст для анализа</label>
+        <textarea
+          id="text-input"
+          class="text-input"
+          placeholder="Вставьте текст (минимум 50 слов)…"
+          x-model="inputText"
+          @input="updateCounters()"
+          :aria-describedby="wordCount < 30 ? 'word-count-hint' : null"
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <!-- Counters -->
+      <div class="flex items-center justify-between mb-3 flex-shrink-0">
+        <span class="text-xs text-text-muted" id="word-count-hint">
+          Слов: <span :class="wordCount < 30 ? 'text-score-ai' : 'text-text-secondary'" x-text="wordCount"></span>
+          <span x-show="wordCount > 0 && wordCount < 30" class="text-score-ai"> (минимум 30)</span>
+          &nbsp;|&nbsp; Символов: <span class="text-text-secondary" x-text="charCount"></span>
+        </span>
+
+        <!-- File loading indicator -->
+        <span x-show="fileLoading" class="text-xs text-text-secondary flex items-center gap-2">
+          <svg class="w-3 h-3 animate-spin text-accent" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Читаю файл…
+        </span>
+      </div>
+
+      <!-- Action bar -->
+      <div class="flex items-center gap-3 flex-wrap flex-shrink-0">
+        <button class="btn-secondary" @click="$refs.fileInput.click()" type="button">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+          </svg>
+          Открыть файл
+        </button>
+
+        <button
+          class="btn-primary"
+          :disabled="wordCount < 30 || analyzing"
+          @click="analyze()"
+          type="button"
+          :aria-busy="analyzing"
+        >
+          <template x-if="!analyzing">
+            <span class="flex items-center gap-2">
+              Анализировать
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/>
+              </svg>
+            </span>
+          </template>
+          <template x-if="analyzing">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              Анализирую…
+            </span>
+          </template>
+        </button>
+      </div>
+
+      <!-- Analyzing progress state -->
+      <div x-show="analyzing" class="mt-4 card flex flex-col items-center py-8 gap-4 flex-shrink-0" role="status" aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="text-center">
+          <p class="text-text-primary font-semibold">Анализирую текст…</p>
+          <p class="text-text-secondary text-sm mt-1">Это может занять 5–30 секунд</p>
+        </div>
+        <!-- Animated dots progress -->
+        <div class="flex gap-1" aria-hidden="true">
+          <template x-for="i in 3" :key="i">
+            <div
+              class="w-2 h-2 rounded-full bg-accent"
+              :style="`animation: pulse 1.2s ease-in-out ${(i-1) * 0.2}s infinite`"
+            ></div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div
+        x-show="errorMsg"
+        class="mt-6 card border-score-ai/30 bg-score-ai/5"
+        role="alert"
+      >
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-score-ai mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+          <div>
+            <p class="text-text-primary font-medium text-sm">Ошибка анализа</p>
+            <p class="text-text-secondary text-sm mt-1" x-text="errorMsg"></p>
+          </div>
+          <button class="ml-auto text-text-muted hover:text-text-primary" @click="errorMsg = ''" aria-label="Закрыть">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- TAB: Результат                                                    -->
+    <!-- ---------------------------------------------------------------- -->
+    <section x-show="tab === 'analyze' && result" x-cloak>
+
+      <!-- Page header -->
+      <header class="mb-5 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary">Результат анализа</h1>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="btn-secondary" @click="resetAnalysis()" type="button">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
+            </svg>
+            Новый анализ
+          </button>
+          <button class="btn-secondary" @click="downloadJSON()" type="button">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+            </svg>
+            JSON
+          </button>
+        </div>
+      </header>
+
+      <!-- ── Hero card ─────────────────────────────────────────────────── -->
+      <div class="card mb-5">
+        <div class="flex items-center gap-8 flex-wrap">
+
+          <!-- Gauge ring (SVG, fixed 160×160 square) -->
+          <div class="flex-shrink-0 flex flex-col items-center" role="img" aria-label="Шкала вероятности ИИ">
+            <svg
+              x-ref="gauge"
+              width="160" height="160"
+              viewBox="0 0 160 160"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <!-- Track arc: cx=80 cy=80 r=62, start=225°, span=270°, gap=90° at bottom -->
+              <path id="gauge-track" d="" stroke="#1E2D45" stroke-width="14" stroke-linecap="round" fill="none"/>
+              <!-- Value arc (colored) -->
+              <path id="gauge-fill"  d="" stroke-width="14" stroke-linecap="round" fill="none"/>
+              <!-- Percentage — baseline at y=82, visual center of glyph ≈ y=71 (middle of arc) -->
+              <text id="gauge-value" x="80" y="82" text-anchor="middle" font-size="30" font-weight="700" fill="#F1F5F9" font-family="Inter,sans-serif">—</text>
+              <!-- Sub-label -->
+              <text id="gauge-label" x="80" y="100" text-anchor="middle" font-size="11" fill="#94A3B8" font-family="Inter,sans-serif">вероятность ИИ</text>
+            </svg>
+          </div>
+
+          <!-- Verdict + confidence + stats -->
+          <div class="flex-1 min-w-0">
+            <!-- Verdict text -->
+            <p
+              class="text-xl font-bold mb-2 leading-snug"
+              :class="scoreColorClass(result?.overall_score ?? 0)"
+              x-text="result?.verdict ?? ''"
+            ></p>
+
+            <!-- Confidence badge -->
+            <span
+              class="badge mb-4 inline-flex"
+              :class="{
+                'bg-score-human/15 text-score-human': result?.confidence === 'high',
+                'bg-score-mixed/15 text-score-mixed': result?.confidence === 'medium',
+                'bg-score-ai/15   text-score-ai':    result?.confidence === 'low',
+              }"
+              x-text="confidenceLabel(result?.confidence ?? 'low')"
+            ></span>
+
+            <!-- Stats chips — 4 in a row -->
+            <div class="grid grid-cols-4 gap-3 mt-3">
+              <div class="stat-chip">
+                <span class="stat-label">Слов</span>
+                <span class="stat-value" x-text="result?.metadata?.word_count ?? 0"></span>
+              </div>
+              <div class="stat-chip">
+                <span class="stat-label">Признаков</span>
+                <span class="stat-value" x-text="(result?.features?.filter(f => f.status !== 'skipped') ?? []).length"></span>
+              </div>
+              <div class="stat-chip">
+                <span class="stat-label">Время</span>
+                <span class="stat-value" x-text="result?.metadata?.analysis_time_ms ? result.metadata.analysis_time_ms + '\u00a0мс' : '—'"></span>
+              </div>
+              <div class="stat-chip">
+                <span class="stat-label">Режим</span>
+                <span class="stat-value" x-text="result?.metadata?.model_used ? 'LLM' : 'Быстрый'"></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Features accordion ─────────────────────────────────────────── -->
+      <div class="card mb-5" x-show="result && result.features && result.features.length > 0">
+        <h2 class="text-base font-semibold text-text-primary mb-4">Сигналы детектора</h2>
+
+        <template x-for="group in featureGroups()" :key="group.key">
+          <div class="mb-1">
+            <button
+              class="accordion-header w-full"
+              @click="toggleCategory(group.key)"
+              :aria-expanded="openCategories.includes(group.key)"
+              type="button"
+            >
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-semibold text-text-primary" x-text="group.label"></span>
+                <span class="text-xs text-text-muted" x-text="`${group.features.length} признаков`"></span>
+              </div>
+              <svg class="w-4 h-4 text-text-muted transition-transform" :class="{ 'rotate-180': openCategories.includes(group.key) }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+
+            <div
+              x-show="openCategories.includes(group.key)"
+              x-transition:enter="transition ease-out duration-150"
+              x-transition:enter-start="opacity-0 -translate-y-1"
+              x-transition:enter-end="opacity-100 translate-y-0"
+              class="pt-2 pb-1"
+            >
+              <template x-for="f in group.features" :key="f.feature_id">
+                <div class="flex items-start gap-3 py-1.5 border-b border-border/30 last:border-0">
+                  <!-- Status dot -->
+                  <span class="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" :class="featureDotColor(f.normalized ?? 0)"></span>
+
+                  <!-- Name + interpretation stacked -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-sm text-text-primary font-medium" x-text="f.name"></span>
+                      <span class="text-xs font-mono font-semibold flex-shrink-0" :class="featureDotColor(f.normalized ?? 0)" x-text="`${Math.round((f.normalized ?? 0) * 100)}%`"></span>
+                    </div>
+                    <!-- Progress bar -->
+                    <div class="feature-bar-track mb-1">
+                      <div
+                        class="feature-bar-fill"
+                        :style="`width: ${Math.round((f.normalized ?? 0) * 100)}%; background: ${featureBarColor(f.normalized ?? 0)}`"
+                        role="progressbar"
+                        :aria-valuenow="Math.round((f.normalized ?? 0) * 100)"
+                        aria-valuemin="0" aria-valuemax="100"
+                      ></div>
+                    </div>
+                    <!-- Interpretation text always visible -->
+                    <p class="text-xs text-text-muted leading-relaxed" x-text="f.interpretation || (f.status === 'skipped' ? 'Пропущено' : '')"></p>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ── Heatmap (full width, below features) ───────────────────────── -->
+      <div class="card" x-show="result && result.segments && result.segments.length > 0">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-4 h-4 text-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/>
+          </svg>
+          <h2 class="text-base font-semibold text-text-primary">Тепловая карта текста</h2>
+          <!-- Legend inline -->
+          <div class="flex items-center gap-3 ml-auto text-xs text-text-secondary">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded inline-block" style="background:rgba(34,197,94,0.35)"></span>Человек</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded inline-block" style="background:rgba(245,158,11,0.35)"></span>Смешанный</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded inline-block" style="background:rgba(239,68,68,0.35)"></span>ИИ</span>
+          </div>
+        </div>
+        <div class="text-sm leading-loose text-text-primary" role="region" aria-label="Подсвеченный текст" x-html="buildHeatmap()"></div>
+      </div>
+
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- TAB: История                                                      -->
+    <!-- ---------------------------------------------------------------- -->
+    <section x-show="tab === 'history'" x-cloak>
+      <header class="mb-6 flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary mb-1">История анализов</h1>
+          <p class="text-text-secondary text-sm" x-text="historyItems.length ? `${historyItems.length} записей` : 'Пусто'"></p>
+        </div>
+        <button
+          class="btn-danger"
+          x-show="historyItems.length > 0"
+          @click="clearHistory()"
+          type="button"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+          Очистить всё
+        </button>
+      </header>
+
+      <!-- Search -->
+      <div class="mb-5" x-show="historyItems.length > 0">
+        <label for="history-search" class="sr-only">Поиск по истории</label>
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <input
+            id="history-search"
+            type="search"
+            placeholder="Поиск по тексту или вердикту…"
+            class="text-input pl-10 min-h-0 py-2.5 text-sm"
+            style="min-height: 0"
+            x-model="historySearch"
+          />
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div x-show="historyLoading" class="flex justify-center py-12" role="status" aria-live="polite" aria-label="Загружается история">
+        <div class="spinner" aria-hidden="true"></div>
+      </div>
+
+      <!-- Empty state -->
+      <div x-show="!historyLoading && historyItems.length === 0" class="text-center py-16">
+        <svg class="w-16 h-16 text-text-muted mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <p class="text-text-secondary text-lg font-medium mb-2">История пуста</p>
+        <p class="text-text-muted text-sm">Выполните анализ текста, чтобы здесь появились записи</p>
+      </div>
+
+      <!-- Items list -->
+      <div class="flex flex-col gap-3" role="list">
+        <template x-for="item in filteredHistory()" :key="item.id">
+          <article
+            class="history-card cursor-pointer"
+            role="listitem"
+            @click="openHistoryItem(item.id)"
+          >
+            <div class="flex items-start justify-between gap-4">
+              <!-- Left: score badge + preview -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-3 mb-2">
+                  <!-- Score badge -->
+                  <span
+                    class="badge text-xs"
+                    :class="scoreBadgeClass(item.overall_score)"
+                    :aria-label="`Оценка ${Math.round(item.overall_score * 100)}%`"
+                    x-text="`${Math.round(item.overall_score * 100)}%`"
+                  ></span>
+
+                  <!-- Date -->
+                  <time
+                    class="text-xs text-text-muted"
+                    :datetime="item.created_at"
+                    x-text="formatDate(item.created_at)"
+                  ></time>
+
+                  <!-- Word count -->
+                  <span class="text-xs text-text-muted" x-text="`${item.word_count} слов`"></span>
+                </div>
+
+                <!-- Text preview -->
+                <p class="text-sm text-text-secondary leading-relaxed line-clamp-2 mb-2" x-text="item.text_preview"></p>
+
+                <!-- Verdict -->
+                <p class="text-sm font-medium" :class="scoreColorClass(item.overall_score)" x-text="item.verdict"></p>
+              </div>
+
+              <!-- Right: actions -->
+              <div class="flex flex-col gap-2 flex-shrink-0" @click.stop>
+                <button
+                  class="btn-danger"
+                  @click.stop="deleteHistoryItem(item.id)"
+                  type="button"
+                  :aria-label="`Удалить запись от ${formatDate(item.created_at)}`"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                  Удалить
+                </button>
+              </div>
+            </div>
+          </article>
+        </template>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- TAB: Настройки                                                    -->
+    <!-- ---------------------------------------------------------------- -->
+    <section x-show="tab === 'settings'" x-cloak>
+      <header class="mb-8">
+        <h1 class="text-2xl font-bold text-text-primary mb-1">Настройки</h1>
+        <p class="text-text-secondary text-sm">Статус системы и конфигурация</p>
+      </header>
+
+      <!-- System status card -->
+      <div class="card mb-6">
+        <h2 class="text-base font-semibold text-text-primary mb-4">Статус системы</h2>
+
+        <div x-show="statusLoading" class="flex items-center gap-3 text-text-secondary text-sm">
+          <svg class="w-4 h-4 animate-spin text-accent" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Получаю статус…
+        </div>
+
+        <div x-show="!statusLoading && systemStatus" class="flex flex-col gap-3">
+          <!-- Status row helper: defined inline via x-html in template or via separate items -->
+          <div class="flex items-center justify-between py-2 border-b border-border">
+            <span class="text-sm text-text-secondary">API статус</span>
+            <span
+              class="badge text-xs"
+              :class="systemStatus?.status === 'ok' ? 'bg-score-human/15 text-score-human' : 'bg-score-ai/15 text-score-ai'"
+              x-text="systemStatus?.status === 'ok' ? 'Работает' : 'Ошибка'"
+            ></span>
+          </div>
+          <div class="flex items-center justify-between py-2 border-b border-border">
+            <span class="text-sm text-text-secondary">Версия</span>
+            <span class="text-sm text-text-primary font-mono" x-text="systemStatus?.version ?? '—'"></span>
+          </div>
+          <div class="flex items-center justify-between py-2 border-b border-border">
+            <span class="text-sm text-text-secondary">Модель</span>
+            <span class="text-sm text-text-primary" x-text="systemStatus?.model ?? 'rule-based'"></span>
+          </div>
+          <div class="flex items-center justify-between py-2">
+            <span class="text-sm text-text-secondary">Ollama</span>
+            <span
+              class="badge text-xs"
+              :class="systemStatus?.ollama_available ? 'bg-score-human/15 text-score-human' : 'bg-text-muted/15 text-text-muted'"
+              x-text="systemStatus?.ollama_available ? 'Доступен' : 'Недоступен'"
+            ></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analyze options card -->
+      <div class="card mb-6">
+        <h2 class="text-base font-semibold text-text-primary mb-4">Параметры анализа</h2>
+        <label class="flex items-center justify-between py-2 cursor-pointer" for="use-llm-toggle">
+          <div>
+            <p class="text-sm text-text-primary font-medium">Использовать LLM</p>
+            <p class="text-xs text-text-muted mt-0.5">Требует Ollama. Повышает точность, но занимает больше времени</p>
+          </div>
+          <!-- Toggle switch -->
+          <div class="relative flex-shrink-0">
+            <input
+              id="use-llm-toggle"
+              type="checkbox"
+              class="sr-only peer"
+              x-model="useLlm"
+            />
+            <div
+              class="w-11 h-6 rounded-full peer transition-colors duration-200"
+              :class="useLlm ? 'bg-accent' : 'bg-border'"
+            ></div>
+            <div
+              class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+              :class="useLlm ? 'translate-x-5' : 'translate-x-0'"
+            ></div>
+          </div>
+        </label>
+      </div>
+
+      <!-- About card -->
+      <div class="card">
+        <h2 class="text-base font-semibold text-text-primary mb-3">О программе</h2>
+        <p class="text-sm text-text-secondary leading-relaxed">
+          <strong class="text-text-primary">Aiqyn</strong> — офлайн-утилита для детекции текста, сгенерированного ИИ, на русском языке.
+          Все вычисления выполняются локально, данные не передаются в интернет.
+        </p>
+        <p class="text-xs text-text-muted mt-3">
+          Результаты анализа носят вероятностный характер и не являются доказательством.
+        </p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Toast notification (portal-style, outside layout flow) -->
+<div
+  x-data="{ show: false, msg: '', type: 'info' }"
+  @toast.window="msg = $event.detail.msg; type = $event.detail.type; show = true; setTimeout(() => show = false, 3500)"
+  x-show="show"
+  x-transition:enter="transition ease-out duration-200"
+  x-transition:enter-start="opacity-0 translate-y-2"
+  x-transition:enter-end="opacity-100 translate-y-0"
+  x-transition:leave="transition ease-in duration-150"
+  x-transition:leave-start="opacity-100"
+  x-transition:leave-end="opacity-0"
+  class="toast"
+  :class="{
+    'bg-score-human text-white': type === 'success',
+    'bg-score-ai text-white':    type === 'error',
+    'bg-card border border-border text-text-primary': type === 'info',
+  }"
+  role="status"
+  aria-live="polite"
+  x-text="msg"
+></div>
+
+<!-- ======================================================================
+     JAVASCRIPT
+====================================================================== -->
+<script>
+// -------------------------------------------------------------------------
+// SVG Gauge drawing
+// -------------------------------------------------------------------------
+
+/**
+ * Convert polar coordinates to cartesian.
+ * @param {number} cx - center x
+ * @param {number} cy - center y
+ * @param {number} r  - radius
+ * @param {number} angleDeg - angle in degrees (0 = right)
+ */
+function polarToCartesian(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * (Math.PI / 180);
+  return {
+    x: cx + r * Math.cos(rad),
+    y: cy + r * Math.sin(rad),
+  };
+}
+
+/**
+ * Build SVG arc path.
+ * @param {number} cx - center x
+ * @param {number} cy - center y
+ * @param {number} r  - radius
+ * @param {number} startAngle - degrees
+ * @param {number} endAngle   - degrees
+ */
+function describeArc(cx, cy, r, startAngle, endAngle) {
+  const start = polarToCartesian(cx, cy, r, endAngle);
+  const end   = polarToCartesian(cx, cy, r, startAngle);
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+}
+
+/**
+ * Interpolate between green → amber → red based on value 0..1.
+ * @param {number} t - 0 (human) to 1 (AI)
+ */
+function gaugeColor(t) {
+  // 0..0.5: green → amber; 0.5..1: amber → red
+  if (t <= 0.5) {
+    const v = t * 2;
+    const r = Math.round(34  + (245 - 34)  * v);  // 34→245
+    const g = Math.round(197 + (158 - 197) * v);  // 197→158
+    const b = Math.round(94  + (11  - 94)  * v);  // 94→11
+    return `rgb(${r},${g},${b})`;
+  } else {
+    const v = (t - 0.5) * 2;
+    const r = Math.round(245 + (239 - 245) * v);
+    const g = Math.round(158 + (68  - 158) * v);
+    const b = Math.round(11  + (68  - 11)  * v);
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+/**
+ * Draw the gauge into an SVG element.
+ * ViewBox 160×160, cx=80 cy=80 r=64.
+ * Arc spans 270° starting at 225° (bottom-LEFT) going CCW to 135° (bottom-RIGHT).
+ * The gap (45°) sits at the bottom center — classic speedometer shape.
+ * polarToCartesian convention: 0°=top, 90°=right, 180°=bottom, 270°=left.
+ * @param {SVGSVGElement} svgEl
+ * @param {number} value - 0..1
+ */
+function drawGauge(svgEl, value) {
+  const cx = 80, cy = 80, r = 62;
+  const startAngle = 225;   // bottom-left endpoint of the arc
+  const totalAngle = 270;   // 270° arc, gap of 90° sits at the bottom
+
+  // Track (full arc)
+  const track = svgEl.querySelector('#gauge-track');
+  if (track) track.setAttribute('d', describeArc(cx, cy, r, startAngle, startAngle + totalAngle));
+
+  // Filled arc
+  const fill = svgEl.querySelector('#gauge-fill');
+  const fillAngle = totalAngle * Math.max(0, Math.min(1, value));
+  if (fill) {
+    if (fillAngle < 2) {
+      fill.setAttribute('d', '');
+    } else {
+      fill.setAttribute('d', describeArc(cx, cy, r, startAngle, startAngle + fillAngle));
+      fill.setAttribute('stroke', gaugeColor(value));
+    }
+  }
+
+  // Text
+  const pct = Math.round(value * 100);
+  const valEl = svgEl.querySelector('#gauge-value');
+  if (valEl) {
+    valEl.textContent = `${pct}%`;
+    valEl.setAttribute('fill', gaugeColor(value));
+  }
+}
+
+// -------------------------------------------------------------------------
+// Alpine.js application
+// -------------------------------------------------------------------------
+
+function aiqynApp() {
+  return {
+    // Navigation
+    tab: 'analyze',
+
+    // Analysis state
+    inputText: '',
+    wordCount: 0,
+    charCount: 0,
+    analyzing: false,
+    result: null,
+    errorMsg: '',
+    useLlm: false,
+    fileLoading: false,
+    dropZoneDragOver: false,
+
+    // Result UI state
+    openCategories: ['statistical', 'syntactic', 'semantic', 'model_based', 'meta'],
+
+    // History state
+    historyItems: [],
+    historyLoading: false,
+    historySearch: '',
+
+    // Settings state
+    systemStatus: null,
+    statusLoading: false,
+
+    // ------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------
+
+    init() {
+      // Register global pulse keyframe if not already in <style>
+      // (Alpine runs after DOM so we can safely manipulate)
+    },
+
+    // ------------------------------------------------------------------
+    // Text input
+    // ------------------------------------------------------------------
+
+    updateCounters() {
+      const text = this.inputText.trim();
+      this.charCount = this.inputText.length;
+      this.wordCount = text.length === 0 ? 0 : text.split(/\s+/).filter(Boolean).length;
+    },
+
+    // ------------------------------------------------------------------
+    // File handling
+    // ------------------------------------------------------------------
+
+    async handleFileSelect(event) {
+      const file = event.target.files?.[0];
+      if (file) await this.loadFile(file);
+      // Reset input so the same file can be re-selected
+      event.target.value = '';
+    },
+
+    async handleFileDrop(event) {
+      this.dropZoneDragOver = false;
+      const file = event.dataTransfer?.files?.[0];
+      if (file) await this.loadFile(file);
+    },
+
+    async loadFile(file) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+
+      // .txt — read entirely on the client (no server round-trip)
+      if (ext === 'txt') {
+        this.fileLoading = true;
+        try {
+          const text = await file.text();
+          this.inputText = text;
+          this.updateCounters();
+          this.showToast(`Загружено: ${file.name}`, 'success');
+        } catch {
+          this.showToast('Не удалось прочитать файл', 'error');
+        } finally {
+          this.fileLoading = false;
+        }
+        return;
+      }
+
+      // .docx / .pdf — upload to backend
+      if (ext === 'docx' || ext === 'pdf') {
+        this.fileLoading = true;
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+          const resp = await fetch('/upload', { method: 'POST', body: formData });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: 'Ошибка сервера' }));
+            throw new Error(err.detail ?? 'Ошибка загрузки файла');
+          }
+          const data = await resp.json();
+          this.inputText = data.text ?? '';
+          this.updateCounters();
+          this.showToast(`Загружено: ${file.name}`, 'success');
+        } catch (e) {
+          this.showToast(e.message ?? 'Ошибка загрузки файла', 'error');
+        } finally {
+          this.fileLoading = false;
+        }
+        return;
+      }
+
+      this.showToast(`Неподдерживаемый формат: .${ext}`, 'error');
+    },
+
+    // ------------------------------------------------------------------
+    // Analysis
+    // ------------------------------------------------------------------
+
+    async analyze() {
+      if (this.wordCount < 30 || this.analyzing) return;
+
+      this.analyzing = true;
+      this.errorMsg = '';
+      this.result = null;
+
+      try {
+        const controller = new AbortController();
+        // 120 second timeout for long LLM analysis
+        const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+        const resp = await fetch('/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: this.inputText, use_llm: this.useLlm }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: 'Неизвестная ошибка' }));
+          throw new Error(err.detail ?? `HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        this.result = data;
+
+        // Draw gauge after DOM update
+        await this.$nextTick();
+        const svgEl = this.$refs.gauge;
+        if (svgEl) drawGauge(svgEl, data.overall_score);
+
+        // Open all category accordions by default
+        this.openCategories = ['statistical', 'syntactic', 'semantic', 'model_based', 'meta'];
+
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          this.errorMsg = 'Превышено время ожидания (120 сек). Попробуйте без LLM.';
+        } else {
+          this.errorMsg = e.message ?? 'Произошла ошибка при анализе';
+        }
+      } finally {
+        this.analyzing = false;
+      }
+    },
+
+    resetAnalysis() {
+      this.result = null;
+      this.errorMsg = '';
+    },
+
+    downloadJSON() {
+      if (!this.result) return;
+      const blob = new Blob([JSON.stringify(this.result, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `aiqyn-result-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.showToast('JSON скачан', 'success');
+    },
+
+    // ------------------------------------------------------------------
+    // Feature display helpers
+    // ------------------------------------------------------------------
+
+    featureGroups() {
+      if (!this.result?.features) return [];
+
+      const categoryMeta = {
+        statistical: { label: 'Статистические', order: 0 },
+        syntactic:   { label: 'Синтаксические', order: 1 },
+        semantic:    { label: 'Семантические',  order: 2 },
+        model_based: { label: 'Модельные',      order: 3 },
+        meta:        { label: 'Мета',           order: 4 },
+      };
+
+      const groups = {};
+      for (const f of this.result.features) {
+        const cat = f.category ?? 'statistical';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(f);
+      }
+
+      return Object.entries(groups)
+        .map(([key, features]) => ({
+          key,
+          label: categoryMeta[key]?.label ?? key,
+          order: categoryMeta[key]?.order ?? 99,
+          features,
+        }))
+        .sort((a, b) => a.order - b.order)
+        .filter(g => g.features.length > 0);
+    },
+
+    toggleCategory(key) {
+      if (this.openCategories.includes(key)) {
+        this.openCategories = this.openCategories.filter(k => k !== key);
+      } else {
+        this.openCategories = [...this.openCategories, key];
+      }
+    },
+
+    featureDotColor(normalized) {
+      if (normalized >= 0.65) return 'bg-score-ai';
+      if (normalized >= 0.35) return 'bg-score-mixed';
+      return 'bg-score-human';
+    },
+
+    featureDotLabel(normalized) {
+      if (normalized >= 0.65) return 'Высокий признак ИИ';
+      if (normalized >= 0.35) return 'Смешанный признак';
+      return 'Признак человека';
+    },
+
+    featureBarColor(normalized) {
+      return gaugeColor(normalized);
+    },
+
+    // ------------------------------------------------------------------
+    // Heatmap
+    // ------------------------------------------------------------------
+
+    buildHeatmap() {
+      if (!this.result?.segments) return '';
+
+      return this.result.segments.map(seg => {
+        const score = seg.score ?? 0;
+        const alpha = 0.15 + score * 0.4; // 0.15..0.55
+        let color;
+        if (score < 0.35) {
+          color = `rgba(34, 197, 94, ${alpha})`;  // green
+        } else if (score < 0.65) {
+          color = `rgba(245, 158, 11, ${alpha})`; // amber
+        } else {
+          color = `rgba(239, 68, 68, ${alpha})`;  // red
+        }
+
+        const pct = Math.round(score * 100);
+        // Escape HTML to prevent XSS (text comes from backend, but still)
+        const safeText = seg.text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+        return `<span class="heatmap-sentence" style="background:${color}" title="${pct}% ИИ">${safeText} </span>`;
+      }).join('');
+    },
+
+    // ------------------------------------------------------------------
+    // Score color helpers
+    // ------------------------------------------------------------------
+
+    scoreColorClass(score) {
+      if (score >= 0.65) return 'text-score-ai';
+      if (score >= 0.35) return 'text-score-mixed';
+      return 'text-score-human';
+    },
+
+    scoreBadgeClass(score) {
+      if (score >= 0.65) return 'bg-score-ai/15 text-score-ai';
+      if (score >= 0.35) return 'bg-score-mixed/15 text-score-mixed';
+      return 'bg-score-human/15 text-score-human';
+    },
+
+    confidenceLabel(conf) {
+      const labels = { high: 'Высокая уверенность', medium: 'Средняя уверенность', low: 'Низкая уверенность' };
+      return labels[conf] ?? conf;
+    },
+
+    // ------------------------------------------------------------------
+    // History
+    // ------------------------------------------------------------------
+
+    async loadHistory() {
+      this.historyLoading = true;
+      try {
+        const resp = await fetch('/history?limit=50');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        this.historyItems = await resp.json();
+      } catch (e) {
+        this.showToast('Не удалось загрузить историю: ' + e.message, 'error');
+      } finally {
+        this.historyLoading = false;
+      }
+    },
+
+    filteredHistory() {
+      if (!this.historySearch.trim()) return this.historyItems;
+      const q = this.historySearch.toLowerCase();
+      return this.historyItems.filter(item =>
+        item.text_preview.toLowerCase().includes(q) ||
+        item.verdict.toLowerCase().includes(q)
+      );
+    },
+
+    async openHistoryItem(id) {
+      try {
+        const resp = await fetch(`/history/${id}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        this.result = data;
+        this.tab = 'analyze';
+
+        // Draw gauge after DOM update
+        await this.$nextTick();
+        const svgEl = this.$refs.gauge;
+        if (svgEl) drawGauge(svgEl, data.overall_score);
+
+        this.openCategories = ['statistical', 'syntactic', 'semantic', 'model_based', 'meta'];
+      } catch (e) {
+        this.showToast('Не удалось открыть результат: ' + e.message, 'error');
+      }
+    },
+
+    async deleteHistoryItem(id) {
+      try {
+        const resp = await fetch(`/history/${id}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        this.historyItems = this.historyItems.filter(item => item.id !== id);
+        this.showToast('Запись удалена', 'success');
+      } catch (e) {
+        this.showToast('Ошибка удаления: ' + e.message, 'error');
+      }
+    },
+
+    async clearHistory() {
+      if (!confirm('Удалить всю историю анализов?')) return;
+      // Delete sequentially — no bulk endpoint yet
+      const ids = this.historyItems.map(i => i.id);
+      let failed = 0;
+      for (const id of ids) {
+        try {
+          const resp = await fetch(`/history/${id}`, { method: 'DELETE' });
+          if (!resp.ok) failed++;
+        } catch {
+          failed++;
+        }
+      }
+      await this.loadHistory();
+      if (failed === 0) {
+        this.showToast('История очищена', 'success');
+      } else {
+        this.showToast(`Удалено ${ids.length - failed} из ${ids.length}`, 'info');
+      }
+    },
+
+    formatDate(iso) {
+      try {
+        return new Date(iso).toLocaleString('ru-RU', {
+          day:    '2-digit',
+          month:  '2-digit',
+          year:   'numeric',
+          hour:   '2-digit',
+          minute: '2-digit',
+        });
+      } catch {
+        return iso;
+      }
+    },
+
+    // ------------------------------------------------------------------
+    // Settings / status
+    // ------------------------------------------------------------------
+
+    async loadStatus() {
+      this.statusLoading = true;
+      try {
+        const resp = await fetch('/status');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        this.systemStatus = await resp.json();
+      } catch (e) {
+        this.showToast('Не удалось получить статус: ' + e.message, 'error');
+      } finally {
+        this.statusLoading = false;
+      }
+    },
+
+    // ------------------------------------------------------------------
+    // Toast
+    // ------------------------------------------------------------------
+
+    showToast(msg, type = 'info') {
+      window.dispatchEvent(new CustomEvent('toast', { detail: { msg, type } }));
+    },
+  };
+}
+</script>
+
+<style>
+  /* Pulse animation for analyzing dots */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.75); }
+  }
+
+  /* x-cloak: hide elements before Alpine initializes */
+  [x-cloak] { display: none !important; }
+
+  /* Line-clamp utility (in case Tailwind CDN version doesn't include it) */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+</style>
+</body>
+</html>

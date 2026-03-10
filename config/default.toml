@@ -1,0 +1,67 @@
+[app]
+name = "Aiqyn"
+version = "0.1.0"
+log_level = "INFO"
+theme = "dark"
+
+[analysis]
+max_text_length = 50000
+min_text_length = 50
+max_tokens_llm = 4096
+segment_size_sentences = 4
+segment_overlap_sentences = 1
+min_segment_words = 50
+
+[model]
+path = ""
+gpu_layers = 0
+context_size = 4096
+temperature = 0.0
+
+[ollama]
+base_url = "http://localhost:11434"
+model = "qwen3:8b"
+
+[thresholds]
+human = 0.35
+mixed = 0.65
+ai_generated = 0.65
+
+[weights]
+f01_perplexity = 0.25
+f02_burstiness = 0.20
+f03_token_entropy = 0.06
+f04_lexical_diversity = 0.15
+f05_ngram_frequency = 0.06
+f06_parse_tree_depth = 0.05
+f07_sentence_length = 0.15
+f08_punctuation_patterns = 0.04
+f09_paragraph_structure = 0.04
+f10_ai_phrases = 0.15
+f11_emotional_neutrality = 0.10
+f12_coherence_smoothness = 0.06
+f13_weak_specificity = 0.05
+f14_token_rank = 0.10
+f15_style_consistency = 0.06
+
+[features]
+enabled = [
+    "f01_perplexity",
+    "f02_burstiness",
+    "f03_token_entropy",
+    "f04_lexical_diversity",
+    "f05_ngram_frequency",
+    "f07_sentence_length",
+    "f08_punctuation_patterns",
+    "f09_paragraph_structure",
+    "f10_ai_phrases",
+    "f11_emotional_neutrality",
+    "f12_coherence_smoothness",
+    "f13_weak_specificity",
+    "f14_token_rank",
+    "f15_style_consistency",
+]
+
+[storage]
+history_max_items = 1000
+export_dir = ""
