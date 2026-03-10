@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import tempfile
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, AsyncIterator
+from pathlib import Path
+from typing import Annotated
 
 import structlog
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from aiqyn import __version__
 from aiqyn.api.models import (
@@ -22,6 +26,8 @@ from aiqyn.core.analyzer import TextAnalyzer
 from aiqyn.models.manager import get_model_manager
 from aiqyn.schemas import AnalysisResult
 from aiqyn.storage.database import HistoryRepository
+from aiqyn.utils.file_reader import read_text_from_file, supported_extensions
+from aiqyn.web.router import router as web_router
 
 log = structlog.get_logger(__name__)
 
@@ -31,6 +37,8 @@ log = structlog.get_logger(__name__)
 
 _analyzer: TextAnalyzer | None = None
 _repository: HistoryRepository | None = None
+
+_STATIC_DIR = Path(__file__).parent.parent / "web" / "static"
 
 
 def _get_analyzer() -> TextAnalyzer:
@@ -85,6 +93,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Mount static files (CSS, JS assets if needed in the future)
+    if _STATIC_DIR.exists():
+        application.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+    # Web UI routes (must be included before API routes so / is not shadowed)
+    application.include_router(web_router)
 
     _register_routes(application)
     return application
@@ -150,6 +165,52 @@ def _register_routes(application: FastAPI) -> None:
 
         return result
 
+    @application.post("/upload", tags=["analysis"])
+    async def upload_file(file: UploadFile) -> dict[str, str]:
+        """Extract text from an uploaded file (.txt, .docx, .pdf).
+
+        Saves to a temporary file, reads with the existing file_reader utility,
+        then cleans up. Returns {"text": "<extracted text>"}.
+        """
+        # Validate extension early to avoid unnecessary disk I/O
+        original_name = file.filename or "upload"
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in supported_extensions():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unsupported file type: {suffix!r}. "
+                    f"Allowed: {', '.join(supported_extensions())}"
+                ),
+            )
+
+        # Stream the upload into a named temp file so file_reader can use Path
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                content = await file.read()
+                tmp.write(content)
+        except Exception as exc:
+            log.error("upload_write_failed", error=str(exc))
+            raise HTTPException(status_code=500, detail="Failed to save uploaded file") from exc
+
+        try:
+            text = read_text_from_file(tmp_path)
+        except (ValueError, ImportError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            log.error("upload_read_failed", error=str(exc), exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to extract text from file") from exc
+        finally:
+            # Always clean up the temp file
+            tmp_path.unlink(missing_ok=True)
+
+        if not text.strip():
+            raise HTTPException(status_code=422, detail="Extracted text is empty")
+
+        log.info("upload_ok", filename=original_name, chars=len(text))
+        return {"text": text}
+
     @application.get("/history", response_model=list[HistoryEntryResponse], tags=["history"])
     async def list_history(
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -174,6 +235,16 @@ def _register_routes(application: FastAPI) -> None:
             )
             for e in sliced
         ]
+
+    @application.get("/history/{entry_id}", tags=["history"])
+    async def get_history_entry(entry_id: int) -> dict:
+        """Return full result JSON for a history entry."""
+        repo = _get_repository()
+        entry = repo.get(entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"History entry {entry_id} not found")
+        import json
+        return json.loads(entry.result_json)
 
     @application.delete("/history/{entry_id}", response_model=DeleteResponse, tags=["history"])
     async def delete_history(entry_id: int) -> DeleteResponse:
