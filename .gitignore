@@ -1,6 +1,6 @@
 .venv/
 venv/
-models/
+/models/
 *.gguf
 *.ggml
 __pycache__/
