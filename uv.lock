@@ -23,6 +23,7 @@ dependencies = [
     { name = "pyside6" },
     { name = "razdel" },
     { name = "reportlab" },
+    { name = "spacy" },
     { name = "structlog" },
     { name = "typer" },
 ]
@@ -87,6 +88,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "scipy", marker = "extra == 'ml'", specifier = ">=1.13" },
     { name = "sentence-transformers", marker = "extra == 'nlp'", specifier = ">=3.0" },
+    { name = "spacy", specifier = ">=3.7" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.7" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "typer", specifier = ">=0.12" },

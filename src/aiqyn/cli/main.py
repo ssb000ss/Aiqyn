@@ -171,3 +171,80 @@ def info() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option("--host", help="Bind host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Bind port")] = 8080,
+    model: Annotated[str | None, typer.Option("--model", help="Ollama model")] = None,
+) -> None:
+    """Start HTTP API server (v1.5+ feature, requires fastapi)."""
+    try:
+        import fastapi  # noqa: F401
+    except ImportError:
+        typer.echo("FastAPI not installed. Run: uv add fastapi uvicorn", err=True)
+        raise typer.Exit(1)
+
+    from aiqyn.logging import setup_logging
+    setup_logging()
+    typer.echo(f"Starting API server on {host}:{port} (not yet implemented)")
+    typer.echo("This feature is planned for v1.5")
+    raise typer.Exit(0)
+
+
+@app.command()
+def calibrate(
+    human_dir: Annotated[str, typer.Argument(help="Dir with human .txt files")],
+    ai_dir: Annotated[str, typer.Argument(help="Dir with AI .txt files")],
+    output: Annotated[str | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Calibrate classifier on a labeled dataset."""
+    from aiqyn.logging import setup_logging
+    from aiqyn.core.analyzer import TextAnalyzer
+    from aiqyn.core.calibrator import PlattCalibrator
+    from aiqyn.config import AppConfig
+    import pathlib
+
+    setup_logging()
+    scores, labels = [], []
+
+    cfg = AppConfig(
+        enabled_features=[
+            "f02_burstiness", "f04_lexical_diversity", "f07_sentence_length",
+            "f10_ai_phrases", "f11_emotional_neutrality", "f09_paragraph_structure",
+            "f12_coherence_smoothness", "f13_weak_specificity", "f15_style_consistency",
+        ]
+    )
+    analyzer = TextAnalyzer(config=cfg, use_llm=False, load_spacy=False)
+
+    for label_val, folder_str in [(0, human_dir), (1, ai_dir)]:
+        folder = pathlib.Path(folder_str)
+        if not folder.exists():
+            typer.echo(f"Folder not found: {folder}", err=True)
+            raise typer.Exit(1)
+        for fpath in folder.glob("*.txt"):
+            try:
+                text = fpath.read_text(encoding="utf-8", errors="replace")
+                if len(text.split()) < 30:
+                    continue
+                result = analyzer.analyze(text)
+                scores.append(result.overall_score)
+                labels.append(label_val)
+                typer.echo(f"  {'AI' if label_val else 'HU'} {fpath.name}: {result.overall_score:.3f}")
+            except Exception as exc:
+                typer.echo(f"  ERROR {fpath.name}: {exc}", err=True)
+
+    if len(scores) < 4:
+        typer.echo("Not enough samples (need ≥ 4 total)", err=True)
+        raise typer.Exit(1)
+
+    cal = PlattCalibrator()
+    cal.fit(scores, labels)
+    metrics = cal.evaluate(scores, labels)
+    save_path = pathlib.Path(output) if output else None
+    cal.save(save_path)
+
+    typer.echo(f"\n✓ Calibration done: A={cal.A:.4f} B={cal.B:.4f}")
+    typer.echo(f"  F1={metrics.get('f1',0):.3f}  Precision={metrics.get('precision',0):.3f}  "
+               f"Recall={metrics.get('recall',0):.3f}  Accuracy={metrics.get('accuracy',0):.3f}")
