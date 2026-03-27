@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import statistics
 from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+# LLM-dependent feature IDs — their absence reduces confidence
+LLM_FEATURE_IDS: frozenset[str] = frozenset({"f01_perplexity", "f14_token_rank", "f16_binoculars"})
 
 
 class FeatureStatus(StrEnum):
@@ -73,39 +77,70 @@ class AnalysisResult(BaseModel):
     metadata: AnalysisMetadata
 
 
-def score_to_label(score: float) -> Literal["human", "ai_generated", "mixed", "unknown"]:
-    if score < 0.35:
+def score_to_label(
+    score: float,
+    *,
+    threshold_human: float = 0.35,
+    threshold_ai: float = 0.65,
+) -> Literal["human", "ai_generated", "mixed", "unknown"]:
+    if score < threshold_human:
         return "human"
-    elif score > 0.65:
+    elif score > threshold_ai:
         return "ai_generated"
     else:
         return "mixed"
 
 
-def score_to_verdict(score: float) -> str:
-    if score < 0.35:
+def score_to_verdict(
+    score: float,
+    *,
+    threshold_human: float = 0.35,
+    threshold_ai: float = 0.65,
+) -> str:
+    mid = (threshold_human + threshold_ai) / 2.0
+    if score < threshold_human:
         return "Скорее всего написано человеком"
-    elif score < 0.50:
+    elif score < mid:
         return "Вероятно написано человеком с признаками ИИ"
-    elif score < 0.65:
+    elif score < threshold_ai:
         return "Неоднозначно: возможна постредактура ИИ"
-    elif score < 0.80:
+    elif score < threshold_ai + 0.15:
         return "Вероятно сгенерировано ИИ"
     else:
         return "С высокой вероятностью сгенерировано ИИ"
 
 
 def score_to_confidence(
-    score: float, feature_results: list[FeatureResult]
+    score: float,
+    feature_results: list[FeatureResult],
+    *,
+    threshold_human: float = 0.35,
+    threshold_ai: float = 0.65,
 ) -> Literal["low", "medium", "high"]:
-    active = [f for f in feature_results if f.status == FeatureStatus.OK]
+    active = [
+        f for f in feature_results
+        if f.status == FeatureStatus.OK and f.normalized is not None
+    ]
     if len(active) < 3:
         return "low"
-    # confidence based on how far score is from decision boundaries
-    distance = min(abs(score - 0.35), abs(score - 0.65))
-    if distance < 0.10:
-        return "low"
-    elif distance < 0.20:
-        return "medium"
-    else:
-        return "high"
+
+    # Base level: distance from nearest decision boundary
+    distance = min(abs(score - threshold_human), abs(score - threshold_ai))
+    base = 0 if distance < 0.10 else (1 if distance < 0.20 else 2)
+
+    # Penalty 1: high spread among features = signals contradict each other
+    norm_values = [f.normalized for f in active]  # type: ignore[misc]
+    if len(norm_values) >= 2 and statistics.stdev(norm_values) > 0.30:
+        base -= 1
+
+    # Penalty 2: no LLM features succeeded (Ollama unavailable)
+    # f01/f14 carry 30–42% of total weight; their absence lowers reliability
+    llm_ok = any(
+        f.feature_id in LLM_FEATURE_IDS and f.status == FeatureStatus.OK
+        for f in feature_results
+    )
+    if not llm_ok:
+        base -= 1
+
+    levels: list[Literal["low", "medium", "high"]] = ["low", "medium", "high"]
+    return levels[max(0, base)]

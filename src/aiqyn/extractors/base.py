@@ -19,7 +19,8 @@ class ExtractionContext:
     tokens: list[str]
     sentences: list[str]
     spacy_doc: "spacy.tokens.Doc | None" = field(default=None, compare=False)
-    llm: "object | None" = field(default=None, compare=False)  # LLMInference
+    llm: "object | None" = field(default=None, compare=False)  # LLMInference (primary)
+    llm_secondary: "object | None" = field(default=None, compare=False)  # secondary OllamaRunner (f16)
 
     # Rich token info from spaCy: (surface, lemma, pos). Empty if spaCy not loaded.
     token_info: list[tuple[str, str, str]] = field(default_factory=list, compare=False)
