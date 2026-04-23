@@ -5,42 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aiqyn — Детектор ИИ-текста</title>
 
-  <!-- Tailwind CSS via CDN (play mode — JIT in browser) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            bg:          '#0F1117',
-            surface:     '#161B27',
-            card:        '#1C2333',
-            accent:      '#3B82F6',
-            'accent-hover': '#2563EB',
-            'text-primary':   '#F1F5F9',
-            'text-secondary': '#94A3B8',
-            'text-muted':     '#475569',
-            border:      '#1E2D45',
-            'score-human': '#22C55E',
-            'score-mixed': '#F59E0B',
-            'score-ai':    '#EF4444',
-          },
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
-        },
-      },
-    };
-  </script>
+  <!-- Tailwind CSS — pre-built, minified, self-hosted -->
+  <link rel="stylesheet" href="/static/styles.css" />
 
-  <!-- Alpine.js v3 -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-  <!-- Inter font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Alpine.js v3 — self-hosted -->
+  <script defer src="/static/vendor/alpine.min.js"></script>
 
   <style>
     /* ------------------------------------------------------------------ */
