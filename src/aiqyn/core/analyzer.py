@@ -22,7 +22,6 @@ from aiqyn.schemas import (
     SegmentResult,
     score_to_confidence,
     score_to_label,
-    score_to_verdict,
 )
 
 log = structlog.get_logger(__name__)
@@ -45,7 +44,7 @@ class TextAnalyzer:
             enabled_features=self._config.enabled_features,
             weights=self._config.active_weights,
         )
-        self._aggregator = WeightedSumAggregator()
+        self._aggregator = WeightedSumAggregator(config=self._config)
         self._segmenter = TextSegmenter(
             window_size=self._config.segment_size_sentences,
             overlap=self._config.segment_overlap_sentences,
@@ -71,12 +70,14 @@ class TextAnalyzer:
 
         # Attach LLM if needed (prefer Ollama, fallback to llama-cpp)
         llm = None
+        llm_secondary = None
         if self._use_llm:
             manager = get_model_manager()
             if not manager.is_loaded:
                 manager.auto_load()
             if manager.backend == "ollama":
                 llm = manager.get_ollama()
+                llm_secondary = manager.get_ollama_secondary()
             else:
                 llm = manager.get_llama()
 
@@ -85,7 +86,10 @@ class TextAnalyzer:
             tokens=ctx.tokens,
             sentences=ctx.sentences,
             spacy_doc=ctx.spacy_doc,
+            token_info=ctx.token_info,
+            ner_spans=ctx.ner_spans,
             llm=llm,
+            llm_secondary=llm_secondary,
         )
 
         # Run pipeline
@@ -156,8 +160,17 @@ class TextAnalyzer:
                     id=seg.id,
                     text=seg.text,
                     score=round(score, 4),
-                    label=score_to_label(score),
-                    confidence=score_to_confidence(score, seg_features),
+                    label=score_to_label(
+                        score,
+                        threshold_human=self._config.threshold_human,
+                        threshold_ai=self._config.threshold_ai,
+                    ),
+                    confidence=score_to_confidence(
+                        score,
+                        seg_features,
+                        threshold_human=self._config.threshold_human,
+                        threshold_ai=self._config.threshold_ai,
+                    ),
                     features=seg_features,
                 ))
             except Exception as exc:
