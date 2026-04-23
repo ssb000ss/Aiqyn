@@ -7,17 +7,22 @@
 
 ## Как это работает
 
-Текст прогоняется через **15 независимых признаков** из пяти категорий:
+Текст прогоняется через **17 независимых признаков** из пяти категорий:
 
 | Категория | Признаки |
 |---|---|
 | Статистические | Перплексия, Бёрстинес, Энтропия токенов, TTR/hapax, N-gram частотность |
 | Синтаксические | Глубина дерева разбора, Длины предложений, Пунктуация, Структура абзацев |
 | Семантические | Маркерные фразы ИИ, Эмоциональный нейтралитет, Когерентность, Слабая конкретика |
-| Модельные | Перплексия (Ollama), Ранг токенов |
+| Модельные | Перплексия (Ollama), Ранг токенов, **Binoculars** (двухмодельный ratio), **RuBERT-tiny2** |
 | Мета | Консистентность стиля |
 
-Результат — взвешенная сумма 0–100%, вердикт и тепловая карта по сегментам текста.
+Результат — взвешенная сумма 0–100%, вердикт, тепловая карта по сегментам и список доказательств
+(*evidence*). Веса подобраны эмпирически на парных сэмплах; дополнительно доступна
+**Platt-калибровка** — при наличии `data/calibration.json` raw-скор корректируется сигмоидой.
+
+> F-16 Binoculars и F-17 RuBERT-tiny2 отключены по умолчанию (`weight = 0.0`) — требуют
+> калибровки на реальном датасете. Остальные 15 активны.
 
 ---
 
@@ -58,10 +63,13 @@ uv run uvicorn aiqyn.api.app:app --host 0.0.0.0 --port 8000 --reload
 
 ```bash
 # Установить Ollama: https://ollama.com
-ollama pull qwen3:8b
+ollama pull qwen3:8b          # основная модель (F-01, F-14)
+ollama pull qwen3:1.7b        # опционально: secondary для F-16 Binoculars
+ollama pull nomic-embed-text  # опционально: embedding-путь для F-12 когерентности
 ```
 
-Без Ollama все 15 признаков продолжают работать — только F-01 и F-14 переходят в fallback-режим.
+Без Ollama все 15 активных признаков продолжают работать — F-01 и F-14 переходят в fallback.
+Без `nomic-embed-text` F-12 падает на spaCy-леммы (если установлена модель) или surface-токены.
 
 ---
 
@@ -79,17 +87,32 @@ ollama pull qwen3:8b
 ## CLI
 
 ```bash
-# Анализ файла
+# Анализ файла (LLM-признаки включены, если Ollama доступен)
 uv run python -m aiqyn analyze text.txt
 
 # Из stdin
 cat text.txt | uv run python -m aiqyn analyze -
 
-# Без LLM (быстрее)
+# Без LLM — в 20-30 раз быстрее, работает полностью офлайн
 uv run python -m aiqyn analyze text.txt --no-llm
 
 # JSON-вывод
 uv run python -m aiqyn analyze text.txt --format json
+```
+
+Пример вывода:
+
+```
+  Вердикт:      Вероятно сгенерировано ИИ
+  Вероятность:  71.5%  [██████████░░░░░]
+  Уверенность:  medium
+  Время:        8.46 сек
+  Слов:         118
+  Признаки:
+    f10_ai_phrases           100.0%  Высокая плотность маркерных фраз ИИ
+    f02_burstiness            99.7%  Низкая вариативность предложений
+    f03_token_entropy         71.2%  Формальная лексика (длина слов=8.3)
+    ...
 ```
 
 ---
@@ -142,8 +165,8 @@ curl -X POST http://localhost:8000/analyze \
 src/aiqyn/
 ├── api/            # FastAPI приложение и схемы запросов
 ├── cli/            # Typer CLI команды
-├── core/           # Оркестратор, пайплайн, препроцессор, агрегатор
-├── extractors/     # 15 экстракторов признаков (f01–f15)
+├── core/           # Оркестратор, пайплайн, препроцессор, агрегатор, Platt-калибратор
+├── extractors/     # 17 экстракторов признаков (f01–f17, f16/f17 off by default)
 ├── models/         # Обёртки над Ollama и llama-cpp
 ├── reports/        # Экспорт в PDF, JSON, Markdown
 ├── storage/        # SQLite история (CRUD)
@@ -154,19 +177,23 @@ config/
 └── default.toml    # Веса признаков, пороги, параметры модели
 data/
 ├── ai_phrases_ru.json   # ~450 маркерных фраз + 60 regex
-└── sentiment_ru.json    # ~820 seed-лемм → 18 000+ словоформ
+├── sentiment_ru.json    # ~820 seed-лемм → 18 000+ словоформ
+└── calibration.json     # (опционально) Platt-коэффициенты A, B
 ```
 
 ---
 
 ## Конфигурация
 
-Настройки читаются из `config/default.toml`, переопределяются переменными окружения:
+Настройки читаются из `config/default.toml`, переопределяются переменными окружения с префиксом
+`AIQYN_`.
 
 ```toml
 [ollama]
-base_url = "http://localhost:11434"
-model    = "qwen3:8b"
+base_url        = "http://localhost:11434"
+model           = "qwen3:8b"
+secondary_model = "qwen3:1.7b"       # для F-16 Binoculars
+embed_model     = "nomic-embed-text" # для F-12 через embeddings
 
 [thresholds]
 human        = 0.35   # score < 0.35 → человек
@@ -179,8 +206,15 @@ max_text_length = 50000
 | Переменная | Описание |
 |---|---|
 | `AIQYN_LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` |
-| `AIQYN_USE_LLM` | `true` / `false` |
-| `AIQYN_MODEL_PATH` | Путь к GGUF-модели |
+| `AIQYN_TEXT_DOMAIN` | `general` (блоги, соцсети) / `formal` (документы, по умолчанию) — переключает набор весов |
+| `AIQYN_OLLAMA_MODEL` | Основная модель для F-01 / F-14 (default: `qwen3:8b`) |
+| `AIQYN_OLLAMA_SECONDARY_MODEL` | Вторая модель для F-16 Binoculars (`""` = отключить) |
+| `AIQYN_OLLAMA_EMBED_MODEL` | Embedding-модель для F-12 (default: `nomic-embed-text`) |
+| `AIQYN_CALIBRATION_PATH` | Путь к `calibration.json` с Platt-коэффициентами; `disabled` = всегда сырой score |
+| `AIQYN_SEGMENT_WEIGHT` | `0.0`–`1.0`: подмешивать ли среднее по сегментам в общий скор (default `0.0` — не мешать) |
+| `AIQYN_EVIDENCE_TOP_N` | Сколько признаков показывать в списке evidence (default `5`) |
+| `AIQYN_THRESHOLD_HUMAN` / `AIQYN_THRESHOLD_AI` | Пороги вердикта (default `0.35` / `0.65`) |
+| `AIQYN_MODEL_PATH` | Путь к GGUF-модели (fallback, если Ollama недоступен) |
 | `AIQYN_GPU_LAYERS` | Кол-во слоёв на GPU (0 = CPU) |
 
 ---
@@ -189,16 +223,26 @@ max_text_length = 50000
 
 ```bash
 # Установить dev-зависимости
-uv sync
+uv sync --extra dev
 
-# Тесты
+# Тесты (~287 unit + интеграционные, прогон < 2 сек)
 uv run pytest
-uv run pytest tests/unit/extractors/test_burstiness.py  # один тест
+uv run pytest tests/unit/extractors/test_f16_binoculars.py -v  # один модуль
 
 # Линтинг
 uv run ruff check src/
 uv run ruff format src/
 ```
+
+Опциональные группы зависимостей:
+
+| Extra | Для чего |
+|---|---|
+| `dev` | pytest, pytest-asyncio, ruff, mypy |
+| `nlp` | spaCy + sentence-transformers |
+| `hf` | transformers + torch (нужен для F-17 RuBERT) |
+| `llm` | llama-cpp-python (CPU/GPU fallback, если нет Ollama) |
+| `ui` | PySide6 + reportlab (legacy desktop) |
 
 ---
 
@@ -219,6 +263,9 @@ uv run ruff format src/
 - Тексты на **русском языке** (другие языки не калиброваны)
 - Результаты **вероятностные** — не являются юридическим доказательством
 - LLM-признаки (F-01, F-14) требуют запущенного Ollama; без него работают в fallback-режиме
+- F-12 когерентность показывает максимальное качество только с `nomic-embed-text` или
+  установленной моделью `ru_core_news_sm` для spaCy — без них падает на surface-токены
+- F-16 / F-17 отключены по умолчанию (`weight = 0.0`) — требуют калибровки на датасете
 - Минимальный размер текста — **30 слов**
 
 ---
