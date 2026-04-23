@@ -130,6 +130,44 @@ class OllamaRunner:
         # low overlap (human text) → near -4
         return math.log(max(overlap, 0.018))  # log(0.018) ≈ -4.0
 
+    def score_window(self, prefix: str, target: str) -> float:
+        """Public wrapper over _score_continuation for cross-model comparison (f16_binoculars).
+
+        Returns pseudo log-prob in range ~[-4, 0]:
+            near 0     → high overlap → predictable → AI-like
+            very negative → low overlap → unpredictable → human-like
+        """
+        return self._score_continuation(prefix, target)
+
+    def get_sentence_embeddings(
+        self,
+        sentences: list[str],
+        *,
+        embed_model: str = "nomic-embed-text",
+    ) -> list[list[float]]:
+        """Fetch sentence embeddings via Ollama /api/embed.
+
+        Returns list of float vectors (one per sentence), or [] on any error.
+        Failure modes: model not pulled, endpoint unavailable, HTTP error.
+        """
+        results: list[list[float]] = []
+        for sentence in sentences:
+            try:
+                r = self._client.post(
+                    "/api/embed",
+                    json={"model": embed_model, "input": sentence},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+                embeddings = r.json().get("embeddings", [])
+                if embeddings:
+                    results.append(embeddings[0])
+                else:
+                    return []  # model not available or returned empty
+            except Exception:
+                return []
+        return results
+
     def get_token_ranks(self, text: str) -> list[float]:
         """Get normalized rank scores for text tokens via Ollama.
 
@@ -140,7 +178,8 @@ class OllamaRunner:
         prefix_size = 10
         ranks: list[float] = []
 
-        for pos in range(prefix_size, min(len(words), prefix_size + 40), 3):
+        positions = list(range(prefix_size, min(len(words), prefix_size + 40), 3))[:5]
+        for pos in positions:
             prefix = " ".join(words[max(0, pos - prefix_size):pos])
             try:
                 payload = {
@@ -152,7 +191,7 @@ class OllamaRunner:
                 }
                 if "qwen3" in self.model:
                     payload["think"] = False
-                r = self._client.post("/api/generate", json=payload)
+                r = self._client.post("/api/generate", json=payload, timeout=12.0)
                 data = r.json()
                 lps = [e["logprob"] for e in data.get("logprobs", [])]
                 if lps:
