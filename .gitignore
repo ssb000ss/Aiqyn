@@ -23,3 +23,4 @@ Output/
 .env
 .env.local
 .claude/
+CLAUDE.md
