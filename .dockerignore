@@ -1,0 +1,52 @@
+# Version control & CI
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# IDE / editor
+.idea/
+.vscode/
+.DS_Store
+.claude/
+CLAUDE.md
+
+# Python build artefacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tests & docs (not needed in production image)
+tests/
+docs/
+README.md
+*.md
+
+# Local databases & logs
+*.db
+*.sqlite3
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Local dev output
+Output/
+/models/
+*.gguf
+*.ggml
+
+# Keep: vendor/ (needed for offline spaCy wheel install inside image)
+#       docker/ is needed by docker-compose build context

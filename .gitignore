@@ -24,3 +24,8 @@ Output/
 .env.local
 .claude/
 CLAUDE.md
+
+# Pre-downloaded build assets (populated by scripts/download_assets.sh).
+# Keep the directory (via .gitkeep) but ignore the actual payload.
+vendor/**/*.whl
+vendor/**/*.tar.gz

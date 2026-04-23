@@ -15,7 +15,16 @@ ENV FORCE_CMAKE=1
 RUN uv sync --extra nlp --extra llm --extra db --no-dev --no-install-project
 
 COPY src/ ./src/
-RUN uv run python3.12 -m spacy download ru_core_news_sm
+
+# Install pre-downloaded spaCy Russian model from vendor/ (offline-friendly).
+# Populate vendor/ on the host first: ./scripts/download_assets.sh
+COPY vendor/ ./vendor/
+RUN if ls vendor/spacy/*.whl >/dev/null 2>&1; then \
+      uv pip install --python .venv/bin/python vendor/spacy/*.whl; \
+    else \
+      echo "WARN: vendor/spacy/ is empty — spaCy model not installed."; \
+      echo "      Run ./scripts/download_assets.sh on host and rebuild."; \
+    fi
 
 # ---- runtime ----
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
