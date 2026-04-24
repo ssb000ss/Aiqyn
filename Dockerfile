@@ -33,10 +33,15 @@ RUN if ls vendor/spacy/*.whl >/dev/null 2>&1; then \
       echo "      Run ./scripts/download_assets.sh on host and rebuild."; \
     fi
 
-# Non-root user for security
-RUN useradd -m -u 1000 aiqyn
+# Non-root user for security. Ensure /app and the venv are owned by it
+# so runtime operations (logging, SQLite writes) don't need root.
+RUN useradd -m -u 1000 aiqyn && chown -R aiqyn:aiqyn /app
 USER aiqyn
+
+# Put the installed venv on PATH so uvicorn/aiqyn are resolved directly,
+# without `uv run` (which re-syncs and would need write access to .venv).
+ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "aiqyn.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "aiqyn.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

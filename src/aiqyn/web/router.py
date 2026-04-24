@@ -16,4 +16,5 @@ router = APIRouter(tags=["ui"])
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     """Serve the main SPA page."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Starlette ≥ 0.27: request must be the first positional argument.
+    return templates.TemplateResponse(request, "index.html")

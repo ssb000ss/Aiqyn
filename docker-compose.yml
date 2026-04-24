@@ -2,19 +2,34 @@ services:
   aiqyn:
     build: .
     ports:
-      - "8000:8000"
+      # Host 8080 → container 8000. Host-side port is deliberately
+      # non-default (8000 is widely used by Django/Flask/Astro) to
+      # avoid collisions on local dev machines. Override via env if
+      # needed: AIQYN_HOST_PORT=9000 docker compose up
+      - "${AIQYN_HOST_PORT:-8080}:8000"
     volumes:
       # Calibration data, phrase dictionaries — writable so the app can update them
       - ./data:/app/data
       # SQLite history DB — persisted across container restarts
       - aiqyn_db:/app/data/db
+      # Live source mount: editable-installed package picks up host changes
+      # after `docker compose restart` (no full rebuild needed during dev).
+      # Comment out for an immutable production image.
+      - ./src:/app/src
+    # Pull config from host .env file (cp .env.example .env to start).
+    # Optional — compose silently ignores missing files via the `:` separator.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Defaults used when not overridden by .env above.
       - AIQYN_LOG_LEVEL=INFO
       # LLM disabled by default in Docker (no Ollama service unless uncommented below)
       - AIQYN_USE_LLM=false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Use Python (always present) instead of curl (slim image has no curl)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
