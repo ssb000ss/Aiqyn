@@ -6,7 +6,8 @@ services:
     image: aiqyn:cpu
     container_name: aiqyn-cpu
     ports:
-      - "8080:8080"
+      # host:container — container side must match EXPOSE 8080 in Dockerfile.cpu
+      - "8000:8080"
     volumes:
       - ./models:/app/models:ro
     environment:
